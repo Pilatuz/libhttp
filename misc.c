@@ -1,4 +1,5 @@
 /**
+ * @file
  * @brief Miscellaneous tools implementation.
  * @author Sergey Polichnoy <pilatuz@gmail.com>
  */

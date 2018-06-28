@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief HTTP client/server interface.
+ * @author Sergey Polichnoy <pilatuz@gmail.com>
+ */
 #ifndef __HTTP_H__
 #define __HTTP_H__
 
@@ -1154,7 +1159,7 @@ typedef int (*HTTP_ClientCallback)(int err, struct HTTP_Conn *conn, void *user_d
 /**
  * @brief Create new HTTP client.
  * @param[in] proto Decided SSL protocol version.
- * @param[out] New HTTP client.
+ * @param[out] client New HTTP client.
  * @return Zero on success.
  *
  * @see http_client_free()
@@ -1455,7 +1460,7 @@ struct HTTP_Server
 /**
  * @brief Create new HTTP server.
  * @param[in] proto Decided SSL protocol version.
- * @param[out] New HTTP server.
+ * @param[out] server New HTTP server.
  * @return Zero on success.
  *
  * @see http_server_free()

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief HTTP client/server implementation.
+ * @author Sergey Polichnoy <pilatuz@gmail.com>
+ */
 #include "http.h"
 
 // logging tweaks

@@ -1,5 +1,6 @@
 /**
- * @brief Miscellaneous tools.
+ * @file
+ * @brief Miscellaneous tools interface.
  * @author Sergey Polichnoy <pilatuz@gmail.com>
  */
 #ifndef __MISC_H__
@@ -22,8 +23,16 @@ extern "C" {
  */
 #ifndef LOG_LEVEL
 // fallback to all messages.
-#define LOG_LEVEL 9
+# define LOG_LEVEL 9
 #endif // LOG_LEVEL
+
+
+/*
+ * log level check.
+ */
+#ifndef LOG_ENABLED
+# define LOG_ENABLED(level) (level <= LOG_LEVEL)
+#endif
 
 
 /*
@@ -31,11 +40,11 @@ extern "C" {
  */
 #ifndef LOG_MODULE
 // fallback to no log module.
-#define LOG_MODULE 0
+# define LOG_MODULE 0
 #endif // LOG_MODULE
 
 
-/*
+/**
  * @brief Print message to log.
  * @param[in] module Module name as LOG_MODULE.
  * @param[in] level Log level.
@@ -55,12 +64,12 @@ void misc_log(const char *module,
 
 // helpers (unused levels should be eliminated at compile-time)
 // arguments are printf-like. at least format message should be provided.
-#define TRACE(...) if (LOG_LEVEL < 5) {} else misc_log(LOG_MODULE, "TRACE", __FILE__, __LINE__, __VA_ARGS__)
-#define DEBUG(...) if (LOG_LEVEL < 4) {} else misc_log(LOG_MODULE, "DEBUG", __FILE__, __LINE__, __VA_ARGS__)
-#define  INFO(...) if (LOG_LEVEL < 3) {} else misc_log(LOG_MODULE,  "INFO", __FILE__, __LINE__, __VA_ARGS__)
-#define  WARN(...) if (LOG_LEVEL < 2) {} else misc_log(LOG_MODULE,  "WARN", __FILE__, __LINE__, __VA_ARGS__)
-#define ERROR(...) if (LOG_LEVEL < 1) {} else misc_log(LOG_MODULE, "ERROR", __FILE__, __LINE__, __VA_ARGS__)
-#define FATAL(...) if (LOG_LEVEL < 0) {} else misc_log(LOG_MODULE, "FATAL", __FILE__, __LINE__, __VA_ARGS__)
+#define TRACE(...) if (!LOG_ENABLED(5)) {} else misc_log(LOG_MODULE, "TRACE", __FILE__, __LINE__, __VA_ARGS__)
+#define DEBUG(...) if (!LOG_ENABLED(4)) {} else misc_log(LOG_MODULE, "DEBUG", __FILE__, __LINE__, __VA_ARGS__)
+#define  INFO(...) if (!LOG_ENABLED(3)) {} else misc_log(LOG_MODULE,  "INFO", __FILE__, __LINE__, __VA_ARGS__)
+#define  WARN(...) if (!LOG_ENABLED(2)) {} else misc_log(LOG_MODULE,  "WARN", __FILE__, __LINE__, __VA_ARGS__)
+#define ERROR(...) if (!LOG_ENABLED(1)) {} else misc_log(LOG_MODULE, "ERROR", __FILE__, __LINE__, __VA_ARGS__)
+#define FATAL(...) if (!LOG_ENABLED(0)) {} else misc_log(LOG_MODULE, "FATAL", __FILE__, __LINE__, __VA_ARGS__)
 
 
 /**
@@ -102,3 +111,30 @@ int misc_select_read(const int *fds, int n_fds,
 #endif // __cplusplus
 
 #endif // __MISC_H__
+
+
+/**
+ * @module Logging
+ *
+ * The logging module designed to be simple and customizable.
+ * There are a few logging levels:
+ * - TRACE
+ * - DEBUG
+ * - INFO
+ * - WARN
+ * - ERROR
+ * - FATAL
+ *
+ * Logging module can be customized in a few ways:
+ * - LOG_LEVEL
+ * - LOG_ENABLED
+ * - LOG_MODULE
+ * - LOG_STREAM
+ * - LOG_PATH_SEPARATOR
+ * - LOG_NO_THREAD_ID
+ * - LOG_NO_TIMESTAMP
+ * - LOG_FULL_FILENAME
+ * - LOG_NO_FLUSH
+ *
+ * Examples:
+ */

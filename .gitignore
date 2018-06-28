@@ -1,1 +1,5 @@
 /test
+
+# Doxygen output
+/html/
+/doxygen.log
