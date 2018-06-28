@@ -1,5 +1,8 @@
 #include "http.h"
 
+#include <wolfssl/wolfcrypt/rsa.h>
+#include <wolfssl/wolfcrypt/ecc.h>
+
 // logging tweaks
 #undef  LOG_MODULE
 #define LOG_MODULE "main"
@@ -257,7 +260,7 @@ static int test_client(void)
 
     // TODO: initialize client SSL context
     // TODO: http_client_set_cipher_list(client, "???");
-    wolfSSL_CTX_UseSNI(client->ctx, 0, "reqres.in", 9);
+    // wolfSSL_CTX_UseSNI(client->ctx, 0, "reqres.in", 9);
 
     //wolfSSL_CTX_load_verify_locations(client->ctx, NULL, "/etc/ssl/certs/");
     http_client_load_verify_cert_file(client, "/etc/ssl/certs/DST_Root_CA_X3.pem"); // www.howsmyssl.com
@@ -451,7 +454,67 @@ static void test_parse_query(const char *query, const char *name, const char *ex
 int main(void)
 {
     if (0) return test_server();
-    if (1) return test_client();
+    if (0) return test_client();
+
+    if (1) // generate certificate
+    {
+        // --enable-keygen or WOLFSSL_KEY_GEN
+
+        // int MakeRsaKey(RsaKey* key, int size, long e, RNG* rng);
+        // Where size is the length in bits and e is the public exponent,
+        // using 65537 is usually a good choice for e.
+
+        RsaKey key;
+        WC_RNG rng;
+        int    ret;
+
+        wc_InitRng(&rng);
+        wc_InitRsaKey(&key, 0);
+        ret = wc_MakeRsaKey(&key, 2048, 0x10001, &rng);
+        if (ret != 0)
+        {
+            ERROR("failed to generate RSA key: %d\n", ret);
+        }
+
+        // The RsaKey genKey can now be used like any other RsaKey.
+        // If you need to export the key, wolfSSL provides both DER and PEM
+        // formatting in asn.h. Always convert the key to DER format first,
+        // and then if you need PEM use the generic DerToPem() function like this:
+
+        byte der[4096];
+        int  derSz = wc_RsaKeyToDer(&key, der, sizeof(der));
+        if (derSz < 0)
+        {
+            ERROR("failed to convert to DER: %d\n", derSz);
+            return -1;
+        }
+        else
+        {
+            INFO("DER size: %d bytes\n", derSz);
+        }
+
+        // The buffer der now holds a DER format of the key.
+        // To convert the DER buffer to PEM use the conversion function:
+
+        byte pem[4096];
+        int  pemSz = wc_DerToPem(der, derSz, pem, sizeof(pem),
+                                 PRIVATEKEY_TYPE);
+        if (pemSz < 0)
+        {
+            ERROR("failed to convert DER to PEM: %d\n", pemSz);
+            return -1;
+        }
+        else
+        {
+            INFO("PEM size: %d bytes\n", pemSz);
+        }
+
+        // The last argument of DerToPem() takes a type parameter,
+        // usually either PRIVATEKEY_TYPE or CERT_TYPE.
+        // Now the buffer pem holds the PEM format of the key.
+
+        INFO("private key:\n%.*s\n", pemSz, pem);
+    }
 
     if (0)
     {

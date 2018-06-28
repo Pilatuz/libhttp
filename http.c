@@ -28,6 +28,7 @@
 
 #elif defined(__linux__) // Linux
 #include <netdb.h>
+#include <strings.h>
 
 #define port_n2h(x) ntohs(x)
 #define port_h2n(x) htons(x)
