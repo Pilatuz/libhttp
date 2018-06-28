@@ -610,7 +610,6 @@ int http_conn_add_request_uri(struct HTTP_Conn *conn,
     if (conn->request.uri) // dynamic buffer is used
     {
         const int old_len = strlen(conn->request.uri);
-#if 0 // old MQX dosn't support realloc()
         char *uri = (char*)realloc(conn->request.uri, old_len+part_len+1);
         if (!uri)
         {
@@ -621,20 +620,6 @@ int http_conn_add_request_uri(struct HTTP_Conn *conn,
 
         memcpy(uri+old_len, uri_part, part_len+1); // also copy '\0'
         conn->request.uri = uri;
-#else
-        char *uri = (char*)malloc(old_len+part_len+1);
-        if (!uri)
-        {
-            ERROR("HttpConn_%p FAILED to allocate* %d bytes of memory to save URI: (%d) %s\n",
-                  conn, old_len+part_len+1, errno, strerror(errno));
-            return HTTP_ERR_NO_MEMORY; // failed
-        }
-
-        memcpy(uri, conn->request.uri, old_len);
-        memcpy(uri+old_len, uri_part, part_len+1); // also copy '\0'
-        free(conn->request.uri); // release old buffer
-        conn->request.uri = uri; // and use new one instead
-#endif
 
         DEBUG("HttpConn_%p update URI=\"%s\" (use dynamic buffer of %d bytes)\n",
               conn, http_conn_get_request_uri(conn), old_len+part_len+1);
