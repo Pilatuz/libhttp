@@ -1,3 +1,7 @@
+/**
+ * @brief Miscellaneous tools.
+ * @author Sergey Polichnoy <pilatuz@gmail.com>
+ */
 #ifndef __MISC_H__
 #define __MISC_H__
 
@@ -33,7 +37,7 @@ extern "C" {
 
 /*
  * @brief Print message to log.
- * @param[in] module Module name.
+ * @param[in] module Module name as LOG_MODULE.
  * @param[in] level Log level.
  * @param[in] file Source file name.
  * @param[in] line Source line number.
@@ -53,8 +57,8 @@ void misc_log(const char *module,
 // arguments are printf-like. at least format message should be provided.
 #define TRACE(...) if (LOG_LEVEL < 5) {} else misc_log(LOG_MODULE, "TRACE", __FILE__, __LINE__, __VA_ARGS__)
 #define DEBUG(...) if (LOG_LEVEL < 4) {} else misc_log(LOG_MODULE, "DEBUG", __FILE__, __LINE__, __VA_ARGS__)
-#define INFO(...)  if (LOG_LEVEL < 3) {} else misc_log(LOG_MODULE, "INFO",  __FILE__, __LINE__, __VA_ARGS__)
-#define WARN(...)  if (LOG_LEVEL < 2) {} else misc_log(LOG_MODULE, "WARN",  __FILE__, __LINE__, __VA_ARGS__)
+#define  INFO(...) if (LOG_LEVEL < 3) {} else misc_log(LOG_MODULE,  "INFO", __FILE__, __LINE__, __VA_ARGS__)
+#define  WARN(...) if (LOG_LEVEL < 2) {} else misc_log(LOG_MODULE,  "WARN", __FILE__, __LINE__, __VA_ARGS__)
 #define ERROR(...) if (LOG_LEVEL < 1) {} else misc_log(LOG_MODULE, "ERROR", __FILE__, __LINE__, __VA_ARGS__)
 #define FATAL(...) if (LOG_LEVEL < 0) {} else misc_log(LOG_MODULE, "FATAL", __FILE__, __LINE__, __VA_ARGS__)
 
@@ -89,6 +93,9 @@ int misc_closesocket(int fd);
  */
 int misc_select_read(const int *fds, int n_fds,
                      int *fd, int timeout_ms);
+
+// TODO: thread abstraction
+// TODO: mutex, semaphore abstractions
 
 #if defined(__cplusplus)
 } // extern "C"

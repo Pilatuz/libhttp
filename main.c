@@ -9,6 +9,9 @@
 #include <string.h>
 #include <stdio.h>
 
+// HTTP server test
+#if defined(HTTP_SERVER)
+
 /**
  * @brief The `/version` handler.
  */
@@ -151,6 +154,10 @@ failed:
     return res;
 }
 
+#endif // HTTP_SERVER
+
+// HTTP client test
+#if defined(HTTP_CLIENT)
 
 /**
  * @brief Print whole server response to the log.
@@ -283,6 +290,7 @@ failed:
     return res;
 }
 
+#endif // HTTP_CLIENT
 
 /**
  * @brief test for `http_parse_url` function.

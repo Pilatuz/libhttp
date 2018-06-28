@@ -1633,7 +1633,7 @@ int http_parse_query(const char **query,
  * @brief Get query parameter by name.
  *
  * If there are a few parameters with the same name
- * only the first occurence is returned.
+ * only the first occurrence is returned.
  *
  * @param[in] query Query string.
  * @param[in] name Query parameter name to get.
@@ -1661,7 +1661,7 @@ int http_match_uri(const char *pattern, const char *uri);
 
 
 /**
- * @brief Find the "\r\n" occurence.
+ * @brief Find the "\r\n" occurrence.
  * @param[in] buf Begin of data buffer.
  * @param[in] len Total number of bytes available.
  * @return Position of "\r\n" or `NULL` if not found.

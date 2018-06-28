@@ -1117,183 +1117,6 @@ static int http_conn_wbuf_shrink(struct HTTP_Conn *conn)
 
 
 /**
- * @brief Parse HTTP request line.
- * @param[in] conn Connection to parse request line of.
- * @param[in] line Begin of request line.
- *                 Should be NULL-terminated for logging purposes.
- * @param[in] len Length of request line in bytes.
- * @return Zero on success.
- */
-static int http_conn_parse_request_line(struct HTTP_Conn *conn, uint8_t *line, int len)
-{
-    TRACE("HttpConn_%p enter http_conn_parse_request_line(\"%.*s\", %d)\n", conn, len, line, len);
-
-    // parse HTTP method (in order of priority)
-    enum HTTP_Method method = HTTP_UNKNOWN_METHOD;
-    uint8_t *method_end = (uint8_t*)memchr(line, ' ', len);
-    if (method_end)
-    {
-        const int method_len = method_end - line;
-        *method_end = 0; // NULL-terminate the method
-        if (method_len == 3 && 0 == memcmp(line, "GET", 3))
-            method = HTTP_GET;
-        else if (method_len == 3 && 0 == memcmp(line, "PUT", 3))
-            method = HTTP_PUT;
-        else if (method_len == 4 && 0 == memcmp(line, "POST", 4))
-            method = HTTP_POST;
-        else if (method_len == 6 && 0 == memcmp(line, "DELETE", 6))
-            method = HTTP_DELETE;
-        else if (method_len == 4 && 0 == memcmp(line, "HEAD", 4))
-            method = HTTP_HEAD;
-        else if (method_len == 7 && 0 == memcmp(line, "OPTIONS", 7))
-            method = HTTP_OPTIONS;
-        else if (method_len == 7 && 0 == memcmp(line, "CONNECT", 7))
-            method = HTTP_CONNECT;
-        else
-        {
-            WARN("HttpConn_%p unknown method \"%.*s\" found, ignored\n",
-                 conn, method_len, line);
-            // try to ignore unknown method...
-        }
-
-        line += method_len + 1; // skip space
-        len -= method_len + 1;  // skip space
-    }
-    else
-    {
-        ERROR("HttpConn_%p bad REQUEST line: %s\n", conn, "no HTTP method found");
-        return HTTP_ERR_BAD_REQUEST_NO_METHOD; // failed
-    }
-
-    // get URI
-    uint8_t *uri_end = (uint8_t*)memchr(line, ' ', len);
-    if (uri_end)
-    {
-        const int uri_len = uri_end - line;
-        const int err = http_conn_set_request_uri(conn, (const char*)line, uri_len);
-        if (HTTP_ERR_SUCCESS != err)
-            return err; // failed
-
-        line += uri_len + 1; // skip space
-        len -= uri_len + 1;  // skip space
-    }
-    else
-    {
-        ERROR("HttpConn_%p bad REQEUST line: %s\n", conn, "no URI found");
-        return HTTP_ERR_BAD_REQUEST_NO_URI; // failed
-    }
-
-    // parse HTTP protocol (in order of priority)
-    enum HTTP_Proto proto = HTTP_UNKNOWN_PROTO;
-    if (len >= 8 && 0 == memcmp(line, "HTTP/1.0", 8))
-    {
-        proto = HTTP_PROTO_1_0;
-        line += 8;
-        len -= 8;
-    }
-    else if (len >= 8 && 0 == memcmp(line, "HTTP/1.1", 8))
-    {
-        proto = HTTP_PROTO_1_1;
-        line += 8;
-        len -= 8;
-    }
-    else
-    {
-        WARN("HttpConn_%p unknown protocol \"%s\" found, ignored\n",
-             conn, line);
-        line += len;
-        len -= len;
-        // try to continue...
-    }
-
-    if (len != 0)
-    {
-        WARN("HttpConn_%p garbage at the end of REQUEST line: \"%s\", ignored\n",
-             conn, line);
-        // garbage is ignored
-    }
-
-    http_conn_set_request_method(conn, method);
-    http_conn_set_request_proto(conn, proto);
-
-    TRACE("HttpConn_%p leave http_conn_parse_request_line()\n", conn);
-    return HTTP_ERR_SUCCESS; // OK
-}
-
-
-/**
- * @brief Parse HTTP response status line.
- * @param[in] conn Connection to parse response status line of.
- * @param[in] line Begin of response status line.
- *                 Should be NULL-terminated for logging purposes.
- * @param[in] len Length of response status line in bytes.
- * @return Zero on success.
- */
-static int http_conn_parse_response_status(struct HTTP_Conn *conn, uint8_t *line, int len)
-{
-    TRACE("HttpConn_%p enter http_conn_parse_response_status(\"%.*s\", %d)\n", conn, len, line, len);
-
-    // parse HTTP protocol
-    enum HTTP_Proto proto = HTTP_UNKNOWN_PROTO;
-    uint8_t *proto_end = (uint8_t*)memchr(line, ' ', len);
-    if (proto_end)
-    {
-        const int proto_len = proto_end - line;
-        *proto_end = 0; // NULL-terminate the protocol
-        if (proto_len == 8 && 0 == memcmp(line, "HTTP/1.0", 8))
-            proto = HTTP_PROTO_1_0;
-        else if (proto_len == 8 && 0 == memcmp(line, "HTTP/1.1", 8))
-            proto = HTTP_PROTO_1_1;
-        else
-        {
-            WARN("HttpConn_%p unknown HTTP protocol \"%.*s\" found, ignored\n",
-                 conn, proto_len, line);
-            // try to continue with unknown HTTP protocol...
-        }
-
-        line += proto_len + 1; // skip space
-        len -= proto_len + 1;  // skip space
-    }
-    else
-    {
-        ERROR("HttpConn_%p bad RESPONSE status: %s\n", conn, "no HTTP protocol found");
-        return HTTP_ERR_BAD_RESPONSE_NO_PROTOCOL; // failed
-    }
-
-    // parse status code
-    char *status_end = 0;
-    const int status = strtol((const char*)line, &status_end, 10);
-    if (!status_end || status_end == (char*)line)
-    {
-        ERROR("HttpConn_%p bad RESPONSE status: %s\n", conn, "no status code found");
-        return HTTP_ERR_BAD_RESPONSE_NO_STATUS; // failed
-    }
-    // TODO: check status range if (status <= 0 || status >= 1000)
-    len -= status_end - (char*)line;
-    line = (uint8_t*)status_end;
-
-    // skip spaces
-    while (len > 0 && *line == ' ')
-    {
-        line += 1;
-        len -= 1;
-    }
-
-    // TODO: check reason is not empty
-
-    // save all parsed values
-    http_conn_set_response_status(conn, status);
-    http_conn_set_response_proto(conn, proto);
-    const int err = http_conn_set_response_reason(conn, (const char*)line, len);
-    if (HTTP_ERR_SUCCESS != err)
-        return err; // failed
-
-    TRACE("HttpConn_%p leave http_conn_parse_response_status()\n", conn);
-    return HTTP_ERR_SUCCESS; // OK
-}
-
-
-/**
  * @brief Parse HTTP header line.
  * @param[in] line Begin of HEADER line.
  *                 Should be NULL-terminated.
@@ -1546,6 +1369,78 @@ static int http_conn_recv_body(struct HTTP_Conn *conn,
 
 // HTTP connection - client related
 #if defined(HTTP_CLIENT)
+
+/**
+ * @brief Parse HTTP response status line.
+ * @param[in] conn Connection to parse response status line of.
+ * @param[in] line Begin of response status line.
+ *                 Should be NULL-terminated for logging purposes.
+ * @param[in] len Length of response status line in bytes.
+ * @return Zero on success.
+ */
+static int http_conn_parse_response_status(struct HTTP_Conn *conn, uint8_t *line, int len)
+{
+    TRACE("HttpConn_%p enter http_conn_parse_response_status(\"%.*s\", %d)\n", conn, len, line, len);
+
+    // parse HTTP protocol
+    enum HTTP_Proto proto = HTTP_UNKNOWN_PROTO;
+    uint8_t *proto_end = (uint8_t*)memchr(line, ' ', len);
+    if (proto_end)
+    {
+        const int proto_len = proto_end - line;
+        *proto_end = 0; // NULL-terminate the protocol
+        if (proto_len == 8 && 0 == memcmp(line, "HTTP/1.0", 8))
+            proto = HTTP_PROTO_1_0;
+        else if (proto_len == 8 && 0 == memcmp(line, "HTTP/1.1", 8))
+            proto = HTTP_PROTO_1_1;
+        else
+        {
+            WARN("HttpConn_%p unknown HTTP protocol \"%.*s\" found, ignored\n",
+                 conn, proto_len, line);
+            // try to continue with unknown HTTP protocol...
+        }
+
+        line += proto_len + 1; // skip space
+        len -= proto_len + 1;  // skip space
+    }
+    else
+    {
+        ERROR("HttpConn_%p bad RESPONSE status: %s\n", conn, "no HTTP protocol found");
+        return HTTP_ERR_BAD_RESPONSE_NO_PROTOCOL; // failed
+    }
+
+    // parse status code
+    char *status_end = 0;
+    const int status = strtol((const char*)line, &status_end, 10);
+    if (!status_end || status_end == (char*)line)
+    {
+        ERROR("HttpConn_%p bad RESPONSE status: %s\n", conn, "no status code found");
+        return HTTP_ERR_BAD_RESPONSE_NO_STATUS; // failed
+    }
+    // TODO: check status range if (status <= 0 || status >= 1000)
+    len -= status_end - (char*)line;
+    line = (uint8_t*)status_end;
+
+    // skip spaces
+    while (len > 0 && *line == ' ')
+    {
+        line += 1;
+        len -= 1;
+    }
+
+    // TODO: check reason is not empty
+
+    // save all parsed values
+    http_conn_set_response_status(conn, status);
+    http_conn_set_response_proto(conn, proto);
+    const int err = http_conn_set_response_reason(conn, (const char*)line, len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
+
+    TRACE("HttpConn_%p leave http_conn_parse_response_status()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
 
 /*
  * http_conn_send_request_line() implementation.
@@ -2074,6 +1969,111 @@ int http_conn_ignore_response_body(struct HTTP_Conn *conn)
 
 // HTTP connection - server related
 #if defined(HTTP_SERVER)
+
+/**
+ * @brief Parse HTTP request line.
+ * @param[in] conn Connection to parse request line of.
+ * @param[in] line Begin of request line.
+ *                 Should be NULL-terminated for logging purposes.
+ * @param[in] len Length of request line in bytes.
+ * @return Zero on success.
+ */
+static int http_conn_parse_request_line(struct HTTP_Conn *conn, uint8_t *line, int len)
+{
+    TRACE("HttpConn_%p enter http_conn_parse_request_line(\"%.*s\", %d)\n", conn, len, line, len);
+
+    // parse HTTP method (in order of priority)
+    enum HTTP_Method method = HTTP_UNKNOWN_METHOD;
+    uint8_t *method_end = (uint8_t*)memchr(line, ' ', len);
+    if (method_end)
+    {
+        const int method_len = method_end - line;
+        *method_end = 0; // NULL-terminate the method
+        if (method_len == 3 && 0 == memcmp(line, "GET", 3))
+            method = HTTP_GET;
+        else if (method_len == 3 && 0 == memcmp(line, "PUT", 3))
+            method = HTTP_PUT;
+        else if (method_len == 4 && 0 == memcmp(line, "POST", 4))
+            method = HTTP_POST;
+        else if (method_len == 6 && 0 == memcmp(line, "DELETE", 6))
+            method = HTTP_DELETE;
+        else if (method_len == 4 && 0 == memcmp(line, "HEAD", 4))
+            method = HTTP_HEAD;
+        else if (method_len == 7 && 0 == memcmp(line, "OPTIONS", 7))
+            method = HTTP_OPTIONS;
+        else if (method_len == 7 && 0 == memcmp(line, "CONNECT", 7))
+            method = HTTP_CONNECT;
+        else
+        {
+            WARN("HttpConn_%p unknown method \"%.*s\" found, ignored\n",
+                 conn, method_len, line);
+            // try to ignore unknown method...
+        }
+
+        line += method_len + 1; // skip space
+        len -= method_len + 1;  // skip space
+    }
+    else
+    {
+        ERROR("HttpConn_%p bad REQUEST line: %s\n", conn, "no HTTP method found");
+        return HTTP_ERR_BAD_REQUEST_NO_METHOD; // failed
+    }
+
+    // get URI
+    uint8_t *uri_end = (uint8_t*)memchr(line, ' ', len);
+    if (uri_end)
+    {
+        const int uri_len = uri_end - line;
+        const int err = http_conn_set_request_uri(conn, (const char*)line, uri_len);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+
+        line += uri_len + 1; // skip space
+        len -= uri_len + 1;  // skip space
+    }
+    else
+    {
+        ERROR("HttpConn_%p bad REQEUST line: %s\n", conn, "no URI found");
+        return HTTP_ERR_BAD_REQUEST_NO_URI; // failed
+    }
+
+    // parse HTTP protocol (in order of priority)
+    enum HTTP_Proto proto = HTTP_UNKNOWN_PROTO;
+    if (len >= 8 && 0 == memcmp(line, "HTTP/1.0", 8))
+    {
+        proto = HTTP_PROTO_1_0;
+        line += 8;
+        len -= 8;
+    }
+    else if (len >= 8 && 0 == memcmp(line, "HTTP/1.1", 8))
+    {
+        proto = HTTP_PROTO_1_1;
+        line += 8;
+        len -= 8;
+    }
+    else
+    {
+        WARN("HttpConn_%p unknown protocol \"%s\" found, ignored\n",
+             conn, line);
+        line += len;
+        len -= len;
+        // try to continue...
+    }
+
+    if (len != 0)
+    {
+        WARN("HttpConn_%p garbage at the end of REQUEST line: \"%s\", ignored\n",
+             conn, line);
+        // garbage is ignored
+    }
+
+    http_conn_set_request_method(conn, method);
+    http_conn_set_request_proto(conn, proto);
+
+    TRACE("HttpConn_%p leave http_conn_parse_request_line()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
 
 /*
  * http_conn_recv_request_line() implementation.
@@ -4150,9 +4150,6 @@ int http_parse_query(const char **query_,
 
         // get "name=value" length
         const int len = strcspn(query, "&#");
-        if (!len)
-            continue;
-
         const char *eq = (const char*)memchr(query, '=', len);
         if (eq) // name=value
         {

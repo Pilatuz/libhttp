@@ -1,16 +1,22 @@
+/**
+ * @brief Miscellaneous tools implementation.
+ * @author Sergey Polichnoy <pilatuz@gmail.com>
+ */
 #include "misc.h"
 
-#if !defined(__linux__) // TODO: MQX platform detection macro???
+#if defined(FREESCALE_MQX)  // MQX
 # include <mqx.h>
 # include <fio.h>
 # include <rtcs.h>
-#elif defined(__linux__) // Linux
+#elif defined(__linux__)    // Linux
 # include <sys/time.h>
 # include <sys/select.h>
 # include <pthread.h>
 # include <unistd.h>
 # include <stdarg.h>
 # include <stdio.h>
+#else
+# error Unsupported platform
 #endif
 
 
@@ -41,6 +47,18 @@
 
 
 /*
+ * Define this to omit thread identifier.
+ */
+// #define LOG_NO_THREAD_ID
+
+
+/*
+ * Define this to omit timestamps.
+ */
+// #define LOG_NO_TIMESTAMP
+
+
+/*
  * Define this to use full source filenames.
  */
 // #define LOG_FULL_FILENAME
@@ -62,26 +80,45 @@ void misc_log(const char *module,
 {
     FILE *stream = LOG_STREAM;
 
-    // print timestamps and thread identifier
-#if defined(__MQX__)        // MQX
+    // print thread identifier
+#if !defined(LOG_NO_THREAD_ID)
+# if defined(__MQX__)       // MQX
+    fprintf(stream, "[%X] ",
+            _task_get_id());
+# elif defined(__linux__)   // Linux
+    // TODO: get pthread identifier
+    fprintf(stream, "[%d] ",
+            getpid());
+# else
+#  error Unsupported platform
+# endif
+#endif // LOG_NO_THREAD_ID
+
+    // print timestamp
+#if !defined(LOG_NO_TIMESTAMP)
+# if defined(__MQX__)        // MQX
     TIME_STRUCT now;
     _time_get_elapsed(&now);
-    fprintf(stream, "[%X] %3d.%03d ",
-            _task_get_id(),
+    fprintf(stream, "%3d.%03d ",
             now.SECONDS,
             now.MILLISECONDS);
-#elif defined(__linux__)    // Linux
+# elif defined(__linux__)    // Linux
     struct timeval tv;
-    if (0 == gettimeofday(&tv, 0))
+    if (0 != gettimeofday(&tv, 0))
     {
-        static time_t start_time = 0;
-        if (!start_time)
-            start_time = tv.tv_sec;
-        fprintf(stream, "[] %.3ld.%06ld ",
-                tv.tv_sec - start_time,
-                tv.tv_usec);
+        tv.tv_sec = 0;
+        tv.tv_usec = 0;
     }
-#endif
+    static time_t start_time = 0;
+    if (!start_time)
+        start_time = tv.tv_sec;
+    fprintf(stream, "%.3ld.%06ld ",
+            tv.tv_sec - start_time,
+            tv.tv_usec);
+# else
+#  error Unsupported platform
+# endif
+#endif // LOG_NO_TIMESTAMP
 
     const char *filename = file;
 #ifndef LOG_FULL_FILENAME
