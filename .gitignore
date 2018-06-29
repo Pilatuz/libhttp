@@ -1,5 +1,8 @@
-/test
+# binary output
+/test/client
+/test/server
+/test/others
 
 # Doxygen output
-/html/
 /doxygen.log
+/html/
