@@ -3918,7 +3918,7 @@ int http_server_main_loop(struct HTTP_Server *server)
         const int timeout_ms = 1000;
         int server_fd = -1; // actual server's socket
         int fds[] = {server->fds, server->fd};
-        err = misc_select_read(fds, 2,
+        err = misc_select_for_read(fds, 2,
                                &server_fd,
                                timeout_ms);
         if (err < 0)

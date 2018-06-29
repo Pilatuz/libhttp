@@ -103,12 +103,78 @@ extern "C" {
 
 // helpers (unused levels usually should be eliminated at compile-time)
 // arguments are printf-like. at least format message should be provided!
-#define TRACE(...) if (!LOG_ENABLED(5)) {} else misc_log(LOG_MODULE, "TRACE", __FILE__, __LINE__, __VA_ARGS__) /**< @hideinitializer @brief Fire the *trace* log message. @see @ref logging_page */
-#define DEBUG(...) if (!LOG_ENABLED(4)) {} else misc_log(LOG_MODULE, "DEBUG", __FILE__, __LINE__, __VA_ARGS__) /**< @hideinitializer @brief Fire the *debug* log message. @see @ref logging_page */
-#define  INFO(...) if (!LOG_ENABLED(3)) {} else misc_log(LOG_MODULE,  "INFO", __FILE__, __LINE__, __VA_ARGS__) /**< @hideinitializer @brief Fire the *info* log message. @see @ref logging_page */
-#define  WARN(...) if (!LOG_ENABLED(2)) {} else misc_log(LOG_MODULE,  "WARN", __FILE__, __LINE__, __VA_ARGS__) /**< @hideinitializer @brief Fire the *warning* log message. @see @ref logging_page */
-#define ERROR(...) if (!LOG_ENABLED(1)) {} else misc_log(LOG_MODULE, "ERROR", __FILE__, __LINE__, __VA_ARGS__) /**< @hideinitializer @brief Fire the *error* log message. @see @ref logging_page */
-#define FATAL(...) if (!LOG_ENABLED(0)) {} else misc_log(LOG_MODULE, "FATAL", __FILE__, __LINE__, __VA_ARGS__) /**< @hideinitializer @brief Fire the *fatal* log message. @see @ref logging_page */
+
+/**
+ * @brief Fire the *trace* log message.
+ *
+ * Should have at least one parameter as format string!
+ *
+ * @see @ref logging_page
+ * @see misc_log()
+ * @hideinitializer
+ */
+#define TRACE(...) if (!LOG_ENABLED(5)) {} else \
+    misc_log(LOG_MODULE, "TRACE", __FILE__, __LINE__, __VA_ARGS__)
+
+/**
+ * @brief Fire the *debug* log message.
+ *
+ * Should have at least one parameter as format string!
+ *
+ * @see @ref logging_page
+ * @see misc_log()
+ * @hideinitializer
+ */
+#define DEBUG(...) if (!LOG_ENABLED(4)) {} else \
+    misc_log(LOG_MODULE, "DEBUG", __FILE__, __LINE__, __VA_ARGS__)
+
+/**
+ * @brief Fire the *info* log message.
+ *
+ * Should have at least one parameter as format string!
+ *
+ * @see @ref logging_page
+ * @see misc_log()
+ * @hideinitializer
+ */
+#define  INFO(...) if (!LOG_ENABLED(3)) {} else \
+    misc_log(LOG_MODULE,  "INFO", __FILE__, __LINE__, __VA_ARGS__)
+
+/**
+ * @brief Fire the *warning* log message.
+ *
+ * Should have at least one parameter as format string!
+ *
+ * @see @ref logging_page
+ * @see misc_log()
+ * @hideinitializer
+ */
+#define  WARN(...) if (!LOG_ENABLED(2)) {} else \
+    misc_log(LOG_MODULE,  "WARN", __FILE__, __LINE__, __VA_ARGS__)
+
+/**
+ * @brief Fire the *error* log message.
+ *
+ * Should have at least one parameter as format string!
+ *
+ * @see @ref logging_page
+ * @see misc_log()
+ * @hideinitializer
+ */
+#define ERROR(...) if (!LOG_ENABLED(1)) {} else \
+    misc_log(LOG_MODULE, "ERROR", __FILE__, __LINE__, __VA_ARGS__)
+
+/**
+ * @brief Fire the *fatal* log message.
+ *
+ * Should have at least one parameter as format string!
+ *
+ * @see @ref logging_page
+ * @see misc_log()
+ * @hideinitializer
+ */
+#define FATAL(...) if (!LOG_ENABLED(0)) {} else \
+    misc_log(LOG_MODULE, "FATAL", __FILE__, __LINE__, __VA_ARGS__)
 
 
 /**
@@ -121,7 +187,6 @@ extern "C" {
  * @param[in] file Source file name.
  * @param[in] line Source line number.
  * @param[in] message Message to print containing `printf`-like format options.
- *
  * @see @ref logging_page
  */
 void misc_log(const char *module,
@@ -142,28 +207,40 @@ void misc_log(const char *module,
  * Millisecond resolution and 32 bits is enough to measure up to 49 days.
  *
  * @return Time in milliseconds.
+ * @see @ref compat_page
  */
 uint32_t misc_time_ms(void);
 
 
 /**
- * @brief Close socket.
- * @param fd Socket descriptor to close.
+ * @brief Close socket file descriptor.
+ *
+ * This is an abstraction on `close()` or `closesocket()` platform
+ * specific function. On some platforms the `shutdown()` also is called.
+ *
+ * @param fd Socket file descriptor to close.
  * @return Zero on success.
+ * @see @ref compat_page
  */
 int misc_closesocket(int fd);
 
 
 /**
- * @brief Check if any socket is ready to read/accept.
+ * @brief Check if any socket is ready for read/accept.
+ *
+ * This is an abstraction on `select()` platform specific function.
+ *
  * @param[in] fds Array of socket file descriptors to check.
  * @param[in] n_fds Number of socket file descriptors to check.
- * @param[out] fd Actual file descriptor selected.
+ * @param[out] fd Actual file descriptor selected on output.
  * @param[in] timeout_ms Wait timeout, milliseconds.
+ *                       Zero to do not wait at all (useful for polling),
+ *                       negative to do wait forever.
  * @return Negative in case of error. Zero if timed out.
+ * @see @ref compat_page
  */
-int misc_select_read(const int *fds, int n_fds,
-                     int *fd, int timeout_ms);
+int misc_select_for_read(const int *fds, int n_fds,
+                         int *fd, int timeout_ms);
 
 // TODO: thread abstraction
 // TODO: mutex, semaphore abstractions
@@ -262,6 +339,7 @@ int misc_select_read(const int *fds, int n_fds,
  * @page compat_page Compatibility
  *
  * There are a few functions used as compatibility layer:
- * - misc_closesocket()
- * - misc_select_read()
+ * - misc_time_ms() is used to measure relative time.
+ * - misc_closesocket() is used to close socket file descriptor.
+ * - misc_select_for_read() is used to select file descriptor ready for read.
  */

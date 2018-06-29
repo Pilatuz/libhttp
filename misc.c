@@ -232,7 +232,7 @@ uint32_t misc_time_ms(void)
 #elif defined(__linux__)    // Linux
     struct timeval tv;
     if (!!gettimeofday(&tv, 0))
-        return 0; // TODO: report error?
+        return 0;
     return tv.tv_sec*1000
          + tv.tv_usec/1000;
 #else
@@ -257,10 +257,10 @@ int misc_closesocket(int fd)
 
 
 /*
- * misc_select_read() implementation.
+ * misc_select_for_read() implementation.
  */
-int misc_select_read(const int *fds, int n_fds,
-                     int *fd, int timeout_ms)
+int misc_select_for_read(const int *fds, int n_fds,
+                         int *fd, int timeout_ms)
 {
 #if defined(__MQX__) // MQX
     int fds[2];
@@ -280,7 +280,7 @@ int misc_select_read(const int *fds, int n_fds,
     return err;
 #elif defined(__linux__) // Linux
     struct timeval to;
-    if (timeout_ms >= 0)
+    if (timeout_ms > 0)
     {
         to.tv_sec = (timeout_ms / 1000);
         to.tv_usec = (timeout_ms % 1000) * 1000;
@@ -291,13 +291,13 @@ int misc_select_read(const int *fds, int n_fds,
         to.tv_usec = 0;
     }
 
-    // accept set
+    // read/accept set
     fd_set read_fds;
     FD_ZERO(&read_fds);
     int max_fd = 0;
     for (int i = 0; i < n_fds; ++i)
     {
-        if (fds[i] >= 0)
+        if (fds[i] >= 0) // valid file descriptor
         {
             FD_SET(fds[i], &read_fds);
             if (max_fd < fds[i])
@@ -308,19 +308,19 @@ int misc_select_read(const int *fds, int n_fds,
     const int err = select(max_fd+1, &read_fds, 0, 0,
                            (timeout_ms >= 0) ? &to : 0);
     if (err <= 0)
-        return err;
+        return err; // failed
 
-    if (fd)
+    if (fd) // update output
     for (int i = 0; i < n_fds; ++i)
     {
-        if (FD_ISSET(fds[i], &read_fds))
+        if (fds[i] >= 0 && FD_ISSET(fds[i], &read_fds))
         {
             *fd = fds[i];
-            break;
+            break; // found
         }
     }
 
-    return err;
+    return err; // OK
 #else
 # error Unsupported platform
 #endif
