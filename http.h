@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief HTTP client/server interface.
+ * @author Sergey Polichnoy <pilatuz@gmail.com>
+ */
 #ifndef __HTTP_H__
 #define __HTTP_H__
 
@@ -1154,7 +1159,7 @@ typedef int (*HTTP_ClientCallback)(int err, struct HTTP_Conn *conn, void *user_d
 /**
  * @brief Create new HTTP client.
  * @param[in] proto Decided SSL protocol version.
- * @param[out] New HTTP client.
+ * @param[out] client New HTTP client.
  * @return Zero on success.
  *
  * @see http_client_free()
@@ -1455,7 +1460,7 @@ struct HTTP_Server
 /**
  * @brief Create new HTTP server.
  * @param[in] proto Decided SSL protocol version.
- * @param[out] New HTTP server.
+ * @param[out] server New HTTP server.
  * @return Zero on success.
  *
  * @see http_server_free()
@@ -1633,7 +1638,7 @@ int http_parse_query(const char **query,
  * @brief Get query parameter by name.
  *
  * If there are a few parameters with the same name
- * only the first occurence is returned.
+ * only the first occurrence is returned.
  *
  * @param[in] query Query string.
  * @param[in] name Query parameter name to get.
@@ -1661,7 +1666,7 @@ int http_match_uri(const char *pattern, const char *uri);
 
 
 /**
- * @brief Find the "\r\n" occurence.
+ * @brief Find the "\r\n" occurrence.
  * @param[in] buf Begin of data buffer.
  * @param[in] len Total number of bytes available.
  * @return Position of "\r\n" or `NULL` if not found.

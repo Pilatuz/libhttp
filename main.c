@@ -9,6 +9,9 @@
 #include <string.h>
 #include <stdio.h>
 
+// HTTP server test
+#if defined(HTTP_SERVER)
+
 /**
  * @brief The `/version` handler.
  */
@@ -151,6 +154,10 @@ failed:
     return res;
 }
 
+#endif // HTTP_SERVER
+
+// HTTP client test
+#if defined(HTTP_CLIENT)
 
 /**
  * @brief Print whole server response to the log.
@@ -250,7 +257,7 @@ static int test_client(void)
 
     // TODO: initialize client SSL context
     // TODO: http_client_set_cipher_list(client, "???");
-    wolfSSL_CTX_UseSNI(client->ctx, 0, "reqres.in", 9);
+    // wolfSSL_CTX_UseSNI(client->ctx, 0, "reqres.in", 9);
 
     //wolfSSL_CTX_load_verify_locations(client->ctx, NULL, "/etc/ssl/certs/");
     http_client_load_verify_cert_file(client, "/etc/ssl/certs/DST_Root_CA_X3.pem"); // www.howsmyssl.com
@@ -283,6 +290,7 @@ failed:
     return res;
 }
 
+#endif // HTTP_CLIENT
 
 /**
  * @brief test for `http_parse_url` function.
