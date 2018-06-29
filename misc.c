@@ -21,12 +21,20 @@
 #endif
 
 
-/*
- * Output stream. Could be `stdout` or `stderr` or any stream of similar type.
- */
+// log stream
 #ifndef LOG_STREAM
-// fallback to stdout
-#define LOG_STREAM stdout
+/**
+ * @brief Log output stream.
+ *
+ * By default defined as `stdout` but can be specified as `stderr` or any
+ * other stream-like variable. In this case that variable should be available
+ * inside `misc.c` file.
+ *
+ * Note, this parameter can be customized only once, for whole application.
+ *
+ * @see @ref logging_page
+ */
+# define LOG_STREAM stdout // fallback to stdout
 #endif // LOG_STREAM
 
 
@@ -38,11 +46,23 @@
  */
 #ifndef LOG_PATH_SEPARATOR
 # if defined(__linux__)
-   // fallback to Linux '/'
-#  define LOG_PATH_SEPARATOR 0x2f
+/**
+ * @brief Log filepath separator.
+ *
+ * This is filepath separator which is used to strip parent directories from
+ * file names (if no #LOG_FULL_FILENAME defined).
+ *
+ * On Linux platform it is defined as `'/'`,
+ * on Windows it is defined as `'\\'`.
+ *
+ * Note, this parameter can be customized only once, for whole application.
+ *
+ * @see @ref logging_page
+ * @see #LOG_FULL_FILENAME
+ */
+#  define LOG_PATH_SEPARATOR ('/')  // fallback to Linux '/'
 # else
-   // fallback to Windows '\\'
-#  define LOG_PATH_SEPARATOR 0x5c
+#  define LOG_PATH_SEPARATOR ('\\') // fallback to Windows '\'
 # endif
 #endif // LOG_PATH_SEPARATOR
 
@@ -50,25 +70,79 @@
 /*
  * Define this to omit thread identifier.
  */
-// #define LOG_NO_THREAD_ID
+#ifndef LOG_NO_THREAD_ID
+/**
+ * @brief Do not print thread identifiers.
+ *
+ * If this macro is defined then no thread identifier is shown in log messages.
+ *
+ * Note, this parameter can be customized only once, for whole application.
+ *
+ * @see @ref logging_page
+ * @see #LOG_NO_TIMESTAMP
+ */
+# define LOG_NO_THREAD_ID // only for doxygen
+# undef LOG_NO_THREAD_ID
+#endif // LOG_NO_THREAD_ID
 
 
 /*
  * Define this to omit timestamps.
  */
-// #define LOG_NO_TIMESTAMP
+#ifndef LOG_NO_TIMESTAMP
+/**
+ * @brief Do not print timestamps.
+ *
+ * If this macro is defined then no timestamp is shown in log messages.
+ *
+ * Note, this parameter can be customized only once, for whole application.
+ *
+ * @see @ref logging_page
+ * @see #LOG_NO_THREAD_ID
+ */
+# define LOG_NO_TIMESTAMP // only for doxygen
+# undef LOG_NO_TIMESTAMP
+#endif // LOG_NO_TIMESTAMP
 
 
 /*
  * Define this to use full source filenames.
  */
-// #define LOG_FULL_FILENAME
+#ifndef LOG_FULL_FILENAME
+/**
+ * @brief Do not strip file names.
+ *
+ * If this macro is defined then full source file names are printed to log.
+ *
+ * Note, this parameter can be customized only once, for whole application.
+ *
+ * @see @ref logging_page
+ * @see #LOG_PATH_SEPARATOR
+ */
+# define LOG_FULL_FILENAME // only for doxygen
+# undef LOG_FULL_FILENAME
+#endif // LOG_FULL_FILENAME
 
 
 /*
  * Define this to do not flush log stream.
  */
-// #define LOG_NO_FLUSH
+#ifndef LOG_NO_FLUSH
+/**
+ * @brief Do not flush log stream after each message.
+ *
+ * If this macro is defined then there is no log stream flush after
+ * each log message. This might produce incomplete log messages due
+ * to buffering. On the other hand flushing may impact overall
+ * application performance.
+ *
+ * Note, this parameter can be customized only once, for whole application.
+ *
+ * @see @ref logging_page
+ */
+# define LOG_NO_FLUSH
+# undef LOG_NO_FLUSH
+#endif // LOG_NO_FLUSH
 
 
 /*
