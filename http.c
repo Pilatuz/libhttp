@@ -209,6 +209,8 @@ const char* http_header_connection_string(enum HTTP_HeaderConnection connection)
 
 /**
  * @brief Connection internal flags.
+ *
+ * These flags are related to request/response sending/receiving.
  */
 enum HTTP_ConnInternalFlags
 {
@@ -217,6 +219,7 @@ enum HTTP_ConnInternalFlags
     CONN_FLAG_REQUEST_HEADERS_SENT      = 0x00020000, /**< @brief All request headers sent. Continue with request body. */
     CONN_FLAG_REQUEST_BODY_SENT         = 0x00040000, /**< @brief Request body sent. Coninue with response receiving. */
     CONN_FLAG_REQUEST_HOST_HEADER_SENT  = 0x00080000, /**< @brief "Host" request header sent. */
+    CONN_FLAG_REQUEST_COLEN_HEADER_SENT = 0x00800000, /**< @brief "Content-Length" request header sent. */
     CONN_FLAG_RESPONSE_STATUS_RECEIVED  = 0x00100000, /**< @brief Response status line received. Continue with response headers. */
     CONN_FLAG_RESPONSE_HEADERS_RECEIVED = 0x00200000, /**< @brief All response headers received. Continue with response body. */
 
@@ -226,6 +229,7 @@ enum HTTP_ConnInternalFlags
     CONN_FLAG_RESPONSE_STATUS_SENT      = 0x10000000, /**< @brief Response status line sent. */
     CONN_FLAG_RESPONSE_HEADERS_SENT     = 0x20000000, /**< @brief All response headers sent. Continue with response body. */
     CONN_FLAG_RESPONSE_BODY_SENT        = 0x40000000, /**< @brief Response body sent. Done. */
+    CONN_FLAG_RESPONSE_COLEN_HEADER_SENT= 0x80000000, /**< @brief "Content-Length" response header sent. */
 
     CONN_FLAG_INTERNAL_MASK             = 0xFFFF0000  /**< @brief Mask for internal flags. */
 };
@@ -1534,10 +1538,14 @@ int http_conn_send_request_header(struct HTTP_Conn *conn,
     if (HTTP_ERR_SUCCESS != err)
         return err;
 
-    // check if "Host" header is sent
+    // check if known headers are sent
     if (0 == strcmp(name, "Host"))
     {
         http_conn_set_flag(conn, CONN_FLAG_REQUEST_HOST_HEADER_SENT);
+    }
+    else if (0 == strcmp(name, "Content-Length"))
+    {
+        http_conn_set_flag(conn, CONN_FLAG_REQUEST_COLEN_HEADER_SENT);
     }
     INFO("HttpConn_%p request header \"%s: %s\" buffered\n", conn, name, value);
     DEBUG("HttpConn_%p internal buffer{pos:%d, len:%d}\n",
@@ -1568,12 +1576,22 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
     // have to finish all headers
     if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_HEADERS_SENT))
     {
-        // have to send Host header or request line
+        // have to send known headers or request line
         if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_HOST_HEADER_SENT))
         {
             // send automatic "Host" header (if not send manually before)
             DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Host");
             const int err = http_conn_send_request_header(conn, "Host", http_conn_get_request_host(conn));
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        else if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_COLEN_HEADER_SENT) && conn->request.headers.content_length >= 0)
+        {
+            // send automatic "Content-Length" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Content-Length");
+            char value[20+1]; // 2^64 takes maximum 20 decimal digits
+            snprintf(value, sizeof(value), "%lld", (long long int)conn->request.headers.content_length);
+            const int err = http_conn_send_request_header(conn, "Content-Length", value);
             if (HTTP_ERR_SUCCESS != err)
                 return err; // failed
         }
@@ -2465,6 +2483,11 @@ int http_conn_send_response_header(struct HTTP_Conn *conn,
     if (HTTP_ERR_SUCCESS != err)
         return err;
 
+    // check if known headers are sent
+    if (0 == strcmp(name, "Content-Length"))
+    {
+        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_COLEN_HEADER_SENT);
+    }
     INFO("HttpConn_%p response header \"%s: %s\" buffered\n", conn, name, value);
     DEBUG("HttpConn_%p internal buffer{pos:%d, len:%d}\n",
           conn, ci->buf_pos, ci->buf_len);
@@ -2493,7 +2516,18 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
     // have to finish all headers
     if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_HEADERS_SENT))
     {
-        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_STATUS_SENT))
+        // have to send known headers or resposne status
+        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_COLEN_HEADER_SENT) && conn->response.headers.content_length >= 0)
+        {
+            // send automatic "Content-Length" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Content-Length");
+            char value[20+1]; // 2^64 takes maximum 20 decimal digits
+            snprintf(value, sizeof(value), "%lld", (long long int)conn->response.headers.content_length);
+            const int err = http_conn_send_request_header(conn, "Content-Length", value);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        else if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_STATUS_SENT))
         {
             // send response status line "PROTOCOL STATUS REASON"
             DEBUG("HttpConn_%p sending response status line...\n", conn);
