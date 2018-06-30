@@ -18,7 +18,7 @@
 
 #include <wolfssl/wolfcrypt/hash.h> // for SHA-1
 
-#ifndef __linux__ // TODO: MQX platform detection macro???
+#if defined(FREESCALE_MQX)  // MQX
 #include <mqx.h>
 #include <rtcs.h>
 #define hostent hostent_struct
@@ -362,9 +362,9 @@ int http_conn_new(WOLFSSL_CTX *ctx, int fd, struct HTTP_Conn **conn_)
     conn->ssl = 0;              // nothing
     conn->remote_ipv4 = 0;      // unknown
     conn->remote_port = 0;      // unknown
-    conn->request.uri = 0;      // use static buffer
-    conn->request.host = 0;     // use static buffer
-    conn->response.reason = 0;  // use static buffer
+    conn->request.uri_dyn = 0;      // use static buffer
+    conn->request.host_dyn = 0;     // use static buffer
+    conn->response.reason_dyn = 0;  // use static buffer
     http_conn_reset(conn);      // more defaults
 
     if (ctx) // is connection secure?
@@ -459,27 +459,27 @@ void http_conn_free(struct HTTP_Conn *conn)
     }
 
     // release URI dynamic buffer
-    if (conn->request.uri)
+    if (conn->request.uri_dyn)
     {
         DEBUG("HttpConn_%p releasing URI dynamic buffer\n", conn);
-        free(conn->request.uri);
-        conn->request.uri = 0;
+        free(conn->request.uri_dyn);
+        conn->request.uri_dyn = 0;
     }
 
     // release HOST dynamic buffer
-    if (conn->request.host)
+    if (conn->request.host_dyn)
     {
         DEBUG("HttpConn_%p releasing HOST dynamic buffer\n", conn);
-        free(conn->request.host);
-        conn->request.host = 0;
+        free(conn->request.host_dyn);
+        conn->request.host_dyn = 0;
     }
 
     // release REASON dynamic buffer
-    if (conn->response.reason)
+    if (conn->response.reason_dyn)
     {
         DEBUG("HttpConn_%p releasing REASON dynamic buffer\n", conn);
-        free(conn->response.reason);
-        conn->response.reason = 0;
+        free(conn->response.reason_dyn);
+        conn->response.reason_dyn = 0;
     }
 
     // release connection
@@ -561,10 +561,10 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
     }
 
     // release previous value if any
-    if (conn->request.uri)
+    if (conn->request.uri_dyn)
     {
-        free(conn->request.uri);
-        conn->request.uri = 0;
+        free(conn->request.uri_dyn);
+        conn->request.uri_dyn = 0;
     }
 
     // update length if it's unknown
@@ -572,27 +572,27 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
         uri_len = strlen(uri);
 
     // if 'fixed' buffer is large enough, use it
-    if (uri_len < (int)sizeof(conn->request.uri_fixed))
+    if (uri_len < (int)sizeof(conn->request.uri_fix))
     {
-        memcpy(conn->request.uri_fixed, uri, uri_len);
-        conn->request.uri_fixed[uri_len] = 0; // null-terminate
-        conn->request.uri = 0; // use static buffer
+        memcpy(conn->request.uri_fix, uri, uri_len);
+        conn->request.uri_fix[uri_len] = 0; // null-terminate
+        conn->request.uri_dyn = 0; // use static buffer
         DEBUG("HttpConn_%p set URI=\"%s\" (use static buffer of %d bytes)\n",
               conn, http_conn_get_request_uri(conn), uri_len);
     }
     else // otherwise allocate dynamic buffer
     {
-        conn->request.uri = (char*)malloc(uri_len+1);
-        if (!conn->request.uri)
+        conn->request.uri_dyn = (char*)malloc(uri_len+1);
+        if (!conn->request.uri_dyn)
         {
             ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save URI: (%d) %s\n",
                   conn, uri_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(conn->request.uri, uri, uri_len);
-        conn->request.uri[uri_len] = 0; // null-terminate
-        conn->request.uri_fixed[0] = 0;
+        memcpy(conn->request.uri_dyn, uri, uri_len);
+        conn->request.uri_dyn[uri_len] = 0; // null-terminate
+        conn->request.uri_fix[0] = 0;
         DEBUG("HttpConn_%p set URI=\"%s\" (use dynamic buffer of %d bytes)\n",
               conn, http_conn_get_request_uri(conn), uri_len+1);
     }
@@ -613,10 +613,10 @@ int http_conn_add_request_uri(struct HTTP_Conn *conn,
     const int part_len = strlen(uri_part);
     // TODO: insert automatic path separator on 'ensure_separator' flag
 
-    if (conn->request.uri) // dynamic buffer is used
+    if (conn->request.uri_dyn) // dynamic buffer is used
     {
-        const int old_len = strlen(conn->request.uri);
-        char *uri = (char*)realloc(conn->request.uri, old_len+part_len+1);
+        const int old_len = strlen(conn->request.uri_dyn);
+        char *uri = (char*)realloc(conn->request.uri_dyn, old_len+part_len+1);
         if (!uri)
         {
             ERROR("HttpConn_%p FAILED to re-allocate %d bytes of memory to save URI: (%d) %s\n",
@@ -625,33 +625,33 @@ int http_conn_add_request_uri(struct HTTP_Conn *conn,
         }
 
         memcpy(uri+old_len, uri_part, part_len+1); // also copy '\0'
-        conn->request.uri = uri;
+        conn->request.uri_dyn = uri;
 
         DEBUG("HttpConn_%p update URI=\"%s\" (use dynamic buffer of %d bytes)\n",
               conn, http_conn_get_request_uri(conn), old_len+part_len+1);
     }
     else // 'fixed' buffer is used
     {
-        const int old_len = strlen(conn->request.uri_fixed);
-        if (old_len+part_len < (int)sizeof(conn->request.uri_fixed))
+        const int old_len = strlen(conn->request.uri_fix);
+        if (old_len+part_len < (int)sizeof(conn->request.uri_fix))
         {
-            memcpy(conn->request.uri_fixed+old_len, uri_part, part_len+1); // also copy '\0'
+            memcpy(conn->request.uri_fix+old_len, uri_part, part_len+1); // also copy '\0'
             DEBUG("HttpConn_%p update URI=\"%s\" (use static buffer of %d bytes)\n",
                   conn, http_conn_get_request_uri(conn), old_len+part_len);
         }
         else // otherwise allocate dynamic buffer
         {
-            conn->request.uri = (char*)malloc(old_len+part_len+1);
-            if (!conn->request.uri)
+            conn->request.uri_dyn = (char*)malloc(old_len+part_len+1);
+            if (!conn->request.uri_dyn)
             {
                 ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save URI: (%d) %s\n",
                       conn, old_len+part_len+1, errno, strerror(errno));
                 return HTTP_ERR_NO_MEMORY; // failed
             }
 
-            memcpy(conn->request.uri, conn->request.uri_fixed, old_len);
-            memcpy(conn->request.uri+old_len, uri_part, part_len+1); // also copy '\0'
-            conn->request.uri_fixed[0] = 0;
+            memcpy(conn->request.uri_dyn, conn->request.uri_fix, old_len);
+            memcpy(conn->request.uri_dyn+old_len, uri_part, part_len+1); // also copy '\0'
+            conn->request.uri_fix[0] = 0;
         }
     }
 
@@ -671,10 +671,10 @@ int http_conn_set_request_host(struct HTTP_Conn *conn,
           conn, host_len, host, host_len);
 
     // release previous value if any
-    if (conn->request.host)
+    if (conn->request.host_dyn)
     {
-        free(conn->request.host);
-        conn->request.host = 0;
+        free(conn->request.host_dyn);
+        conn->request.host_dyn = 0;
     }
 
     // update length if it's unknown
@@ -682,27 +682,27 @@ int http_conn_set_request_host(struct HTTP_Conn *conn,
         host_len = strlen(host);
 
     // if 'fixed' buffer is large enough, use it
-    if (host_len < (int)sizeof(conn->request.host_fixed))
+    if (host_len < (int)sizeof(conn->request.host_fix))
     {
-        memcpy(conn->request.host_fixed, host, host_len);
-        conn->request.host_fixed[host_len] = 0; // null-terminate
-        conn->request.host = 0; // use static buffer
+        memcpy(conn->request.host_fix, host, host_len);
+        conn->request.host_fix[host_len] = 0; // null-terminate
+        conn->request.host_dyn = 0; // use static buffer
         DEBUG("HttpConn_%p set HOST=\"%s\" (use static buffer of %d bytes)\n",
               conn, http_conn_get_request_host(conn), host_len);
     }
     else // otherwise allocate dynamic buffer
     {
-        conn->request.host = (char*)malloc(host_len+1);
-        if (!conn->request.host)
+        conn->request.host_dyn = (char*)malloc(host_len+1);
+        if (!conn->request.host_dyn)
         {
             ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save HOST: (%d) %s\n",
                   conn, host_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(conn->request.host, host, host_len);
-        conn->request.host[host_len] = 0; // null-terminate
-        conn->request.host_fixed[0] = 0;
+        memcpy(conn->request.host_dyn, host, host_len);
+        conn->request.host_dyn[host_len] = 0; // null-terminate
+        conn->request.host_fix[0] = 0;
         DEBUG("HttpConn_%p set HOST=\"%s\" (use dynamic buffer of %d bytes)\n",
               conn, http_conn_get_request_host(conn), host_len+1);
     }
@@ -782,10 +782,10 @@ int http_conn_set_response_reason(struct HTTP_Conn *conn,
     }
 
     // release previous value if any
-    if (conn->response.reason)
+    if (conn->response.reason_dyn)
     {
-        free(conn->response.reason);
-        conn->response.reason = 0;
+        free(conn->response.reason_dyn);
+        conn->response.reason_dyn = 0;
     }
 
     // update length if it's unknown
@@ -793,27 +793,27 @@ int http_conn_set_response_reason(struct HTTP_Conn *conn,
         reason_len = strlen(reason);
 
     // if 'fixed' buffer is large enough, use it
-    if (reason_len < (int)sizeof(conn->response.reason_fixed))
+    if (reason_len < (int)sizeof(conn->response.reason_fix))
     {
-        memcpy(conn->response.reason_fixed, reason, reason_len);
-        conn->response.reason_fixed[reason_len] = 0; // null-terminate
-        conn->response.reason = 0; // use static buffer
+        memcpy(conn->response.reason_fix, reason, reason_len);
+        conn->response.reason_fix[reason_len] = 0; // null-terminate
+        conn->response.reason_dyn = 0; // use static buffer
         DEBUG("HttpConn_%p set REASON=\"%s\" (use static buffer of %d bytes)\n",
               conn, http_conn_get_response_reason(conn), reason_len);
     }
     else // otherwise allocate dynamic buffer
     {
-        conn->response.reason = (char*)malloc(reason_len+1);
-        if (!conn->response.reason)
+        conn->response.reason_dyn = (char*)malloc(reason_len+1);
+        if (!conn->response.reason_dyn)
         {
             ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save REASON: (%d) %s\n",
                   conn, reason_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(conn->response.reason, reason, reason_len);
-        conn->response.reason[reason_len] = 0; // null-terminate
-        conn->response.reason_fixed[0] = 0;
+        memcpy(conn->response.reason_dyn, reason, reason_len);
+        conn->response.reason_dyn[reason_len] = 0; // null-terminate
+        conn->response.reason_fix[0] = 0;
         DEBUG("HttpConn_%p set REASON=\"%s\" (use dynamic buffer of %d bytes)\n",
               conn, http_conn_get_response_reason(conn), reason_len+1);
     }
@@ -2680,7 +2680,7 @@ void http_client_free(struct HTTP_Client *client)
     // release all cached connections
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
-        struct HTTP_ClientConnCacheItem *item = &client->conn_cache[i];
+        struct HTTP_ClientConnCacheEntry *item = &client->conn_cache[i];
         if (!item->conn)
             continue;
 
@@ -2728,7 +2728,7 @@ static struct HTTP_Conn* http_client_conn_cache_take(struct HTTP_Client *client,
     // iterate over all cached items
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
-        struct HTTP_ClientConnCacheItem *item = &client->conn_cache[i];
+        struct HTTP_ClientConnCacheEntry *item = &client->conn_cache[i];
         struct HTTP_Conn *conn = item->conn;
         if (!conn)
             continue;
@@ -2760,14 +2760,14 @@ static struct HTTP_Conn* http_client_conn_cache_take(struct HTTP_Client *client,
 static void http_client_conn_cache_save(struct HTTP_Client *client,
                                         struct HTTP_Conn *conn)
 {
-    struct HTTP_ClientConnCacheItem *place = 0;
+    struct HTTP_ClientConnCacheEntry *place = 0;
 
     // TODO: lock mutex
 
     // iterate over all cached items
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
-        struct HTTP_ClientConnCacheItem *item = &client->conn_cache[i];
+        struct HTTP_ClientConnCacheEntry *item = &client->conn_cache[i];
         struct HTTP_Conn *conn = item->conn;
         if (!conn)
         {
@@ -2833,13 +2833,13 @@ static int http_client_host_digest(const char *host, int host_len,
  * @param[in] host_digest Target host digest.
  * @return Cache item or `NULL` if nothing found.
  */
-static struct HTTP_ResolveCacheItem* http_client_resolve_cache_find(struct HTTP_Client *client,
+static struct HTTP_ResolveCacheEntry* http_client_resolve_cache_find(struct HTTP_Client *client,
                                                                     const void *host_digest)
 {
     // iterate over all items
     for (int i = 0; i < HTTP_RESOLVE_CACHE_SIZE; ++i)
     {
-        struct HTTP_ResolveCacheItem *item = &client->resolve_cache[i];
+        struct HTTP_ResolveCacheEntry *item = &client->resolve_cache[i];
         if (!item->ipv4)
             continue; // no address, check next
 
@@ -2859,14 +2859,14 @@ static struct HTTP_ResolveCacheItem* http_client_resolve_cache_find(struct HTTP_
  * @param[in] client HTTP client.
  * @return Cache item.
  */
-static struct HTTP_ResolveCacheItem* http_client_resolve_cache_find_place(struct HTTP_Client *client)
+static struct HTTP_ResolveCacheEntry* http_client_resolve_cache_find_place(struct HTTP_Client *client)
 {
-    struct HTTP_ResolveCacheItem *place = 0;
+    struct HTTP_ResolveCacheEntry *place = 0;
 
     // iterate over all items
     for (int i = 0; i < HTTP_RESOLVE_CACHE_SIZE; ++i)
     {
-        struct HTTP_ResolveCacheItem *item = &client->resolve_cache[i];
+        struct HTTP_ResolveCacheEntry *item = &client->resolve_cache[i];
         if (!item->ipv4) // item is empty
             return item; // use it
 
@@ -2892,7 +2892,7 @@ static int http_client_resolve_cache_remove(struct HTTP_Client *client, uint32_t
     // iterate over all items
     for (int i = 0; i < HTTP_RESOLVE_CACHE_SIZE; ++i)
     {
-        struct HTTP_ResolveCacheItem *item = &client->resolve_cache[i];
+        struct HTTP_ResolveCacheEntry *item = &client->resolve_cache[i];
         if (item->ipv4 == ipv4)
         {
             item->ipv4 = 0; // clear it
@@ -3023,7 +3023,7 @@ static int http_client_connect(struct HTTP_Client *client,
         const int err = http_client_host_digest(host, host_len, &host_digest, sizeof(host_digest));
         if (HTTP_ERR_SUCCESS != err)
             return err; // failed
-        struct HTTP_ResolveCacheItem *rc_item = http_client_resolve_cache_find(client, host_digest);
+        struct HTTP_ResolveCacheEntry *rc_item = http_client_resolve_cache_find(client, host_digest);
         if (rc_item) // TODO: check item lifetime
         {
             addr.sin_addr.s_addr = rc_item->ipv4;
