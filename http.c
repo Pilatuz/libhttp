@@ -4280,15 +4280,16 @@ const void* http_find_crlf(const void *buf, int len)
     {
         const uint8_t *p = (const uint8_t*)memchr(buf, '\r', len);
         if (!p)
-        {
-            break;
-        }
+            break; // stop
+
+        len -= p+1 - (const uint8_t*)buf;
+        buf = p+1; // ignore '\r'
+        if (!len)
+            break; // stop
 
         if (p[1] != '\n')
         {
             // '\r' found as a standalone symbol
-            len -= p+1 - (const uint8_t*)buf;
-            buf = p+1; // ignore '\r'
             continue;
         }
 

@@ -58,9 +58,10 @@ void test_match_uri(const char *pattern, const char *uri, int expected)
 /**
  * @brief test for `http_find_crlf` function.
  */
-void test_find_crlf(const char *line, const char *expected)
+void test_find_crlf(const char *line, int len, const char *expected)
 {
-    int len = strlen(line);
+    if (len < 0)
+        len = strlen(line);
     const char *crlf = (const char*)http_find_crlf(line, len);
 
     // escape non-print symbols
@@ -215,14 +216,15 @@ int main(void)
 
     if (all)
     {
-        test_find_crlf("no", 0);
-        test_find_crlf("no\nno", 0);
-        test_find_crlf("\nno\nno", 0);
-        test_find_crlf("no\nno\rx\nno", 0);
-        test_find_crlf("\n\n\r\nyes", "\r\nyes");
-        test_find_crlf("no\r\nyes", "\r\nyes");
-        test_find_crlf("\r\nyes", "\r\nyes");
-        test_find_crlf("no\nno\r\nyes", "\r\nyes");
-        test_find_crlf("\nno\r\nyes", "\r\nyes");
+        test_find_crlf("no", -1, 0);
+        test_find_crlf("no\nno", -1, 0);
+        test_find_crlf("\nno\nno", -1, 0);
+        test_find_crlf("no\nno\rx\nno", -1, 0);
+        test_find_crlf("\n\n\r\nyes", -1, "\r\nyes");
+        test_find_crlf("no\r\nyes", -1, "\r\nyes");
+        test_find_crlf("\r\nyes", -1, "\r\nyes");
+        test_find_crlf("no\nno\r\nyes", -1, "\r\nyes");
+        test_find_crlf("\nno\r\nyes", -1, "\r\nyes");
+        test_find_crlf("\nno\r\nyes", 4, 0);
     }
 }
