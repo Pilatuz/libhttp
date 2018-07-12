@@ -213,6 +213,8 @@ void misc_log(const char *module,
     vfprintf(stream, message, args);
     va_end(args);
 
+    // TODO: fprintf(stream, "\n"); // new line at the end
+
 #ifndef LOG_NO_FLUSH
     fflush(stream);
 #endif // LOG_NO_FLUSH

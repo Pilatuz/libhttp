@@ -68,11 +68,17 @@ const char* ssl_proto_string(enum SSL_Proto proto)
 {
     switch (proto)
     {
+#ifdef WOLFSSL_ALLOW_SSLV3
     case SSL_PROTO_SSLv3:               return "SSLv3";
+#endif // WOLFSSL_ALLOW_SSLV3
+#ifdef WOLFSSL_ALLOW_TLSV10
     case SSL_PROTO_TLSv1_0:             return "TLSv1.0";
+#endif // WOLFSSL_ALLOW_TLSV10
     case SSL_PROTO_TLSv1_1:             return "TLSv1.1";
     case SSL_PROTO_TLSv1_2:             return "TLSv1.2";
+#ifdef WOLFSSL_TLS13
     case SSL_PROTO_TLSv1_3:             return "TLSv1.3";
+#endif // WOLFSSL_TLS13
     case SSL_PROTO_TLSv1_2_TO_SSLv3:    return "SSLv3-TLSv1.2";
     }
 

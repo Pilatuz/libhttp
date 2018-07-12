@@ -86,11 +86,17 @@ extern "C" {
  */
 enum SSL_Proto
 {
+#ifdef WOLFSSL_ALLOW_SSLV3
     SSL_PROTO_SSLv3,                /**< @brief SSL v3 (obsolete) */
+#endif // WOLFSSL_ALLOW_SSLV3
+#ifdef WOLFSSL_ALLOW_TLSV10
     SSL_PROTO_TLSv1_0,              /**< @brief TLS v1.0 (obsolete) */
+#endif // WOLFSSL_ALLOW_TLSV10
     SSL_PROTO_TLSv1_1,              /**< @brief TLS v1.1 (obsolete) */
     SSL_PROTO_TLSv1_2,              /**< @brief TLS v1.2 */
+#ifdef WOLFSSL_TLS13
     SSL_PROTO_TLSv1_3,              /**< @brief TLS v1.3 (draft) */
+#endif // WOLFSSL_TLS13
     SSL_PROTO_TLSv1_2_TO_SSLv3      /**< @brief Any of TLS v1.2 to SSL v3 */
 };
 
