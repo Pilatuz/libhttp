@@ -269,6 +269,7 @@ enum HTTP_Error
     HTTP_ERR_BAD_URL_NO_URI         = -106, /**< @brief Bad URL: no URI path */
     HTTP_ERR_BAD_URL_PROTOCOL       = -107, /**< @brief Bad URL protocol */
     HTTP_ERR_BAD_HEADER_NO_COLON    = -108, /**< @brief No header colon */
+    HTTP_ERR_BAD_CHUNK_NO_LENGTH    = -109, /**< @brief No chunk length */
 
     // request/response
     HTTP_ERR_BAD_REQUEST_NO_METHOD      = -200, /**< @brief Bad request: no method */
@@ -296,7 +297,7 @@ enum HTTP_ConnFlags
     HTTP_CONN_DO_NOT_CACHE      = 0x0001, /**< @brief Do not cache connection after use */
     HTTP_CONN_NO_THREAD         = 0x0002, /**< @brief Do not run additional thread */
     HTTP_CONN_CHECK_DOMAIN_NAME = 0x0010, /**< @brief Check domain name during SSL handshake */
-    HTTP_CONN_USE_SNI           = 0x0020, /**< @brief Use Server Name Indication TLS extension */
+    HTTP_CONN_USE_SNI           = 0x0020  /**< @brief Use Server Name Indication TLS extension */
 };
 
 
@@ -311,7 +312,7 @@ enum HTTP_HeaderConnection
     HTTP_CONNECTION_MISSING,    /**< @brief Header is missing. */
     HTTP_CONNECTION_UNKNOWN,    /**< @brief Unknown value. */
     HTTP_CONNECTION_KEEP_ALIVE, /**< @brief Connection should be kept alive. */
-    HTTP_CONNECTION_CLOSE,      /**< @brief Connection should be closed. */
+    HTTP_CONNECTION_CLOSE       /**< @brief Connection should be closed. */
 };
 
 
@@ -332,6 +333,39 @@ enum HTTP_HeaderConnection http_header_connection_parse(const char *value);
  * @see HTTP_HeaderConnection
  */
 const char* http_header_connection_string(enum HTTP_HeaderConnection connection);
+
+
+/**
+ * @brief Possible values of "Transfer-Encoding" header.
+ *
+ * @see http_header_transfer_encoding_parse()
+ * @see http_header_transfer_encoding_string()
+ */
+enum HTTP_HeaderTransferEncoding
+{
+    HTTP_TRANSFER_ENCODING_MISSING, /**< @brief Header is missing. */
+    HTTP_TRANSFER_ENCODING_UNKNOWN, /**< @brief Unknown value. */
+    HTTP_TRANSFER_ENCODING_CHUNKED  /**< @brief Chunked transfer encoding. */
+};
+
+
+/**
+ * @brief Parse the "Transfer-Encoding" header.
+ * @param value Transfer-Encoding value as string.
+ * @return Parsed Transfer-Encoding value.
+ * @see HTTP_HeaderTransferEncoding
+ */
+enum HTTP_HeaderTransferEncoding http_header_transfer_encoding_parse(const char *value);
+
+
+/**
+ * @brief Get "Transfer-Encoding" header as a string.
+ * @param transfer_encoding Transfer-Encoding value.
+ * @return Transfer-Encoding value as string.
+ *         "unknown" for unknown values.
+ * @see HTTP_HeaderTransferEncoding
+ */
+const char* http_header_transfer_encoding_string(enum HTTP_HeaderTransferEncoding transfer_encoding);
 
 
 // HTTP connection
@@ -412,6 +446,10 @@ struct HTTP_Request
          */
         enum HTTP_HeaderConnection connection;
 
+        /**
+         * @brief The "Transfer-Encoding" header.
+         */
+        enum HTTP_HeaderTransferEncoding transfer_encoding;
     } headers;
     /**<
      * @brief Set of known request headers.
@@ -478,7 +516,10 @@ struct HTTP_Response
          */
         enum HTTP_HeaderConnection connection;
 
-        // TODO: Transfer-Encoding
+        /**
+         * @brief The "Transfer-Encoding" header.
+         */
+        enum HTTP_HeaderTransferEncoding transfer_encoding;
     } headers;
     /**<
      * @brief Set of known response headers.
@@ -732,6 +773,41 @@ int http_conn_set_request_host(struct HTTP_Conn *conn,
 
 
 /**
+ * @brief Check if HTTP request is chunked.
+ * @param[in] conn Connection to check.
+ * @return Non-zero if request is chunked.
+ *
+ * @relates HTTP_Conn
+ */
+static inline int http_conn_is_request_chunked(const struct HTTP_Conn *conn)
+{
+    return (HTTP_TRANSFER_ENCODING_CHUNKED == conn->request.headers.transfer_encoding);
+}
+
+
+/**
+ * @brief Get remaining length of HTTP request content.
+ *
+ * Note, this value contains number of remaining bytes in the request's
+ * content. If the "Transfer-Encoding: chunked" mode is used then
+ * this value contains remaining length of the current data chunk.
+ *
+ * @param conn Connection to check.
+ * @return Number of bytes can be received on next iteration.
+ */
+static inline int http_conn_request_content_can_recv(const struct HTTP_Conn *conn)
+{
+    if (conn->request.headers.content_length >= 0)
+    {
+        const int64_t rem = (conn->request.headers.content_length - conn->internal.content_pos);
+        return rem >= 0 ? (int)rem : 0; // TODO: check overflow
+    }
+
+    return 0; // we don't know how much can be received
+}
+
+
+/**
  * @brief Get HTTP response protocol as string.
  * @param conn Connection to get protocol of.
  * @return Response protocol string.
@@ -824,6 +900,41 @@ static inline const char* http_conn_get_response_reason(const struct HTTP_Conn *
 int http_conn_set_response_reason(struct HTTP_Conn *conn,
                                   const char *reason,
                                   int reason_len);
+
+
+/**
+ * @brief Check if HTTP response is chunked.
+ * @param[in] conn Connection to check.
+ * @return Non-zero if response is chunked.
+ *
+ * @relates HTTP_Conn
+ */
+static inline int http_conn_is_response_chunked(const struct HTTP_Conn *conn)
+{
+    return (HTTP_TRANSFER_ENCODING_CHUNKED == conn->response.headers.transfer_encoding);
+}
+
+
+/**
+ * @brief Get remaining length of HTTP response content.
+ *
+ * Note, this value contains number of remaining bytes in the response's
+ * content. If the "Transfer-Encoding: chunked" mode is used then
+ * this value contains remaining length of the current data chunk.
+ *
+ * @param conn Connection to check.
+ * @return Number of bytes can be received on next iteration.
+ */
+static inline int http_conn_response_content_can_recv(const struct HTTP_Conn *conn)
+{
+    if (conn->response.headers.content_length >= 0)
+    {
+        const int64_t rem = (conn->response.headers.content_length - conn->internal.content_pos);
+        return rem >= 0 ? (int)rem : 0; // TODO: check overflow
+    }
+
+    return 0; // we don't know how much can be received
+}
 
 
 // HTTP connection - client related

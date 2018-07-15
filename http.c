@@ -210,6 +210,37 @@ const char* http_header_connection_string(enum HTTP_HeaderConnection connection)
     return "unknown";
 }
 
+
+/*
+ * http_transfer_encoding_header_parse() implementation.
+ */
+enum HTTP_HeaderTransferEncoding http_header_transfer_encoding_parse(const char *value)
+{
+    if (0 == strcasecmp(value, "chunked"))
+        return HTTP_TRANSFER_ENCODING_CHUNKED;
+
+    return HTTP_TRANSFER_ENCODING_UNKNOWN;
+}
+
+
+/*
+ * http_transfer_encoding_header_string() implementation.
+ */
+const char* http_header_transfer_encoding_string(enum HTTP_HeaderTransferEncoding transfer_encoding)
+{
+    switch (transfer_encoding)
+    {
+    case HTTP_TRANSFER_ENCODING_CHUNKED:    return "chunked";
+
+    // all others...
+    case HTTP_TRANSFER_ENCODING_MISSING: break;
+    case HTTP_TRANSFER_ENCODING_UNKNOWN: break;
+    }
+
+    return "unknown";
+}
+
+
 // HTTP connection
 #if defined(HTTP_CLIENT) || defined(HTTP_SERVER)
 
@@ -221,23 +252,25 @@ const char* http_header_connection_string(enum HTTP_HeaderConnection connection)
 enum HTTP_ConnInternalFlags
 {
     // client side
-    CONN_FLAG_REQUEST_LINE_SENT         = 0x00010000, /**< @brief Request line sent. Continue with sending request headers. */
-    CONN_FLAG_REQUEST_HEADERS_SENT      = 0x00020000, /**< @brief All request headers sent. Continue with request body. */
-    CONN_FLAG_REQUEST_BODY_SENT         = 0x00040000, /**< @brief Request body sent. Coninue with response receiving. */
-    CONN_FLAG_REQUEST_HOST_HEADER_SENT  = 0x00080000, /**< @brief "Host" request header sent. */
-    CONN_FLAG_REQUEST_COLEN_HEADER_SENT = 0x00800000, /**< @brief "Content-Length" request header sent. */
-    CONN_FLAG_RESPONSE_STATUS_RECEIVED  = 0x00100000, /**< @brief Response status line received. Continue with response headers. */
-    CONN_FLAG_RESPONSE_HEADERS_RECEIVED = 0x00200000, /**< @brief All response headers received. Continue with response body. */
+    CONN_FLAG_REQUEST_LINE_SENT                         = 0x00010000, /**< @brief Request line sent. Continue with sending request headers. */
+    CONN_FLAG_REQUEST_HEADERS_SENT                      = 0x00020000, /**< @brief All request headers sent. Continue with request body. */
+    CONN_FLAG_REQUEST_BODY_SENT                         = 0x00040000, /**< @brief Request body sent. Coninue with response receiving. */
+    CONN_FLAG_REQUEST_HOST_HEADER_SENT                  = 0x00080000, /**< @brief "Host" request header sent. */
+    CONN_FLAG_REQUEST_TRANSFER_ENCODING_HEADER_SENT     = 0x00400000, /**< @brief "Transfer-Encoding" request header sent. */
+    CONN_FLAG_REQUEST_CONTENT_LENGTH_HEADER_SENT        = 0x00800000, /**< @brief "Content-Length" request header sent. */
+    CONN_FLAG_RESPONSE_STATUS_RECEIVED                  = 0x00100000, /**< @brief Response status line received. Continue with response headers. */
+    CONN_FLAG_RESPONSE_HEADERS_RECEIVED                 = 0x00200000, /**< @brief All response headers received. Continue with response body. */
 
     // server side
-    CONN_FLAG_REQUEST_LINE_RECEIVED     = 0x01000000, /**< @brief Request line received. Continue receiving request headers. */
-    CONN_FLAG_REQUEST_HEADERS_RECEIVED  = 0x02000000, /**< @brief All request headers received. Continue with request body. */
-    CONN_FLAG_RESPONSE_STATUS_SENT      = 0x10000000, /**< @brief Response status line sent. */
-    CONN_FLAG_RESPONSE_HEADERS_SENT     = 0x20000000, /**< @brief All response headers sent. Continue with response body. */
-    CONN_FLAG_RESPONSE_BODY_SENT        = 0x40000000, /**< @brief Response body sent. Done. */
-    CONN_FLAG_RESPONSE_COLEN_HEADER_SENT= 0x80000000, /**< @brief "Content-Length" response header sent. */
+    CONN_FLAG_REQUEST_LINE_RECEIVED                     = 0x01000000, /**< @brief Request line received. Continue receiving request headers. */
+    CONN_FLAG_REQUEST_HEADERS_RECEIVED                  = 0x02000000, /**< @brief All request headers received. Continue with request body. */
+    CONN_FLAG_RESPONSE_STATUS_SENT                      = 0x10000000, /**< @brief Response status line sent. */
+    CONN_FLAG_RESPONSE_HEADERS_SENT                     = 0x20000000, /**< @brief All response headers sent. Continue with response body. */
+    CONN_FLAG_RESPONSE_BODY_SENT                        = 0x40000000, /**< @brief Response body sent. Done. */
+    CONN_FLAG_RESPONSE_TRANSFER_ENCODING_HEADER_SENT    = 0x04000000, /**< @brief "Transfer-Encoding" response header sent. */
+    CONN_FLAG_RESPONSE_CONTENT_LENGTH_HEADER_SENT       = 0x80000000, /**< @brief "Content-Length" response header sent. */
 
-    CONN_FLAG_INTERNAL_MASK             = 0xFFFF0000  /**< @brief Mask for internal flags. */
+    CONN_FLAG_INTERNAL_MASK                             = 0xFFFF0000  /**< @brief Mask for internal flags. */
 };
 
 
@@ -306,6 +339,7 @@ static void http_conn_reset(struct HTTP_Conn *conn)
     http_conn_set_request_host(conn, "", 0);
     conn->request.headers.content_length = -1; // missing
     conn->request.headers.connection = HTTP_CONNECTION_MISSING;
+    conn->request.headers.transfer_encoding = HTTP_TRANSFER_ENCODING_MISSING;
 
     // reset response
     conn->response.protocol = HTTP_UNKNOWN_PROTO;
@@ -313,6 +347,7 @@ static void http_conn_reset(struct HTTP_Conn *conn)
     http_conn_set_response_reason(conn, "", 0);
     conn->response.headers.content_length = -1; // missing
     conn->response.headers.connection = HTTP_CONNECTION_MISSING;
+    conn->response.headers.transfer_encoding = HTTP_TRANSFER_ENCODING_MISSING;
 
     // reset working buffer
     conn->internal.buf_pos = 0;
@@ -1235,7 +1270,7 @@ static int http_conn_recv_header(struct HTTP_Conn *conn,
                                  const char **name,
                                  const char **value)
 {
-    TRACE("HttpConn_%p enter http_conn_recv_header()\n", conn);
+    // TRACE("HttpConn_%p enter http_conn_recv_header()\n", conn);
     struct HTTP_ConnInternal *ci = &conn->internal;
 
     int attempt = 0;
@@ -1296,7 +1331,7 @@ static int http_conn_recv_header(struct HTTP_Conn *conn,
         break; // done
     }
 
-    TRACE("HttpConn_%p leave http_conn_recv_header()\n", conn);
+    // TRACE("HttpConn_%p leave http_conn_recv_header()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
 }
 
@@ -1364,6 +1399,209 @@ static int http_conn_recv_body(struct HTTP_Conn *conn,
 
     *len_ = total_read; // report actual size!
     TRACE("HttpConn_%p leave http_conn_recv_body(%d)\n", conn, *len_);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Parse HTTP chunk line.
+ * @param[in] line Begin of CHUNK line.
+ *                 Should be NULL-terminated.
+ * @param[in] len Length of CHUNK line in bytes.
+ * @param[out] chunk_len Chunk length in bytes.
+ * @return Zero on success.
+ */
+static int http_parse_chunk_line(char *line, int len, uint32_t *chunk_len)
+{
+    //TRACE("enter http_parse_chunk_line(\"%.*s\", %d)\n", len, line, len);
+
+    char *end = 0;
+    unsigned long L = strtoul(line, &end, 16);
+    if (end == line)
+    {
+        ERROR("http_parse_chunk_line(): bad CHUNK line \"%.*s\": %s\n",
+              len, line, "no chunk length found");
+        return HTTP_ERR_BAD_CHUNK_NO_LENGTH;
+    }
+
+    // chunk extensions are ignored...
+    if (chunk_len) *chunk_len = L;
+
+    //TRACE("leave http_parse_chunk_line()\n");
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Send CHUNK length helper.
+ *
+ * Chunk length will be written to internal buffer.
+ * If there is no available space in the buffer then
+ * buffer will be sent to the underlying socket first.
+ *
+ * @param[in] conn Connection to send to.
+ * @param[in] chunk_len Chunk length in bytes.
+ * @return Zero on success.
+ */
+static int http_conn_send_chunk_len(struct HTTP_Conn *conn, uint32_t chunk_len)
+{
+    TRACE("HttpConn_%p enter http_conn_send_chunk_len(%d)\n", conn, chunk_len);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+    while (1) // at most two iterations
+    {
+        // try to put "chunk length" to the end of internal buffer
+        const int space = HTTP_CONN_BUF_SIZE - ci->buf_len;
+        const int err = snprintf((char*)&ci->buf[ci->buf_len],
+                                 space, "%x\r\n", chunk_len);
+        if (err < 0)
+        {
+            ERROR("HttpConn_%p failed to format chunk length: (%d) %s\n",
+                  conn, errno, strerror(errno));
+            return HTTP_ERR_FAILED; // failed
+        }
+        else if (err >= space)
+        {
+            // in some rare cases the chunk line
+            // could be too big to fit working buffer
+            if (space == HTTP_CONN_BUF_SIZE)
+            {
+                ERROR("HttpConn_%p failed to send chunk length: %s\n",
+                      conn, "too long to fit internal buffer");
+                return HTTP_ERR_FAILED; // failed
+            }
+
+            // buffer is overflow!
+            DEBUG("HttpConn_%p sending working buffer of %d bytes...\n", conn, ci->buf_len);
+            const int err = http_conn_send_all(conn, ci->buf, ci->buf_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+            ci->buf_len = 0; // buffer is empty now
+            continue; // try again with empty buffer...
+        }
+
+        ci->buf_len += err;
+        break; // done
+    }
+
+    TRACE("HttpConn_%p leave http_conn_send_chunk_len()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Receive CHUNK length helper.
+ *
+ * @param[in] conn Connection to receive from.
+ * @param[out] chunk_len Chunk length in bytes.
+ * @return Zero on success.
+ */
+static int http_conn_recv_chunk_len(struct HTTP_Conn *conn,
+                                    uint32_t *chunk_len)
+{
+    TRACE("HttpConn_%p enter http_conn_recv_chunk_len()\n", conn);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+    int attempt = 0;
+    while (1) // read CHUNK line
+    {
+        // usually do not grow buffer on first iteration
+        // grow it only if there is no data in working buffer
+        if (attempt || (ci->buf_len - ci->buf_pos) <= 0)
+        {
+            // do we have space in working buffer?
+            if (HTTP_CONN_BUF_SIZE - ci->buf_len > 0)
+            {
+                // getting some data into working buffer
+                DEBUG("HttpConn_%p growing working buffer (attempt:%d)...\n",
+                      conn, attempt);
+                const int err = http_conn_wbuf_grow(conn);
+                if (HTTP_ERR_SUCCESS != err)
+                    return err; // failed
+            }
+            else
+            {
+                ERROR("HttpConn_%p header line too big to fit working buffer\n", conn);
+                return HTTP_ERR_FAILED; // failed
+            }
+        }
+
+        // check the whole line received
+        uint8_t *line_beg = ci->buf + ci->buf_pos;
+        const uint8_t *line_end = (const uint8_t*)http_find_crlf(line_beg,
+                                               ci->buf_len - ci->buf_pos);
+        if (!line_end)
+        {
+            // have to shrink buffer?
+            if (ci->buf_len >= HTTP_CONN_BUF_SIZE)
+            {
+                DEBUG("HttpConn_%p working buffer is full, shrinking...\n", conn);
+                const int err = http_conn_wbuf_shrink(conn);
+                if (HTTP_ERR_SUCCESS != err)
+                    return err;
+            }
+
+            attempt += 1;
+            continue; // need more data
+        }
+
+        const int line_len = (line_end - line_beg);
+        if (line_len)
+        {
+            // parse CHUNK line
+            line_beg[line_len] = 0; // NULL-terminate for logging purpose
+            const int err = http_parse_chunk_line((char*)line_beg, line_len,
+                                                   chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        else
+        {
+            ERROR("http_conn_recv_chunk_len(): bad CHUNK line: %s\n",
+                  "no chunk length found");
+            return HTTP_ERR_BAD_CHUNK_NO_LENGTH;
+        }
+
+        ci->buf_pos += line_len + 2; // + "\r\n"
+        break; // done
+    }
+
+    TRACE("HttpConn_%p leave http_conn_recv_chunk_len()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Receive CHUNK end helper.
+ *
+ * @param[in] conn Connection to receive from.
+ * @return Zero on success.
+ */
+static int http_conn_recv_chunk_end(struct HTTP_Conn *conn)
+{
+    TRACE("HttpConn_%p enter http_conn_recv_chunk_end()\n", conn);
+
+    uint8_t crlf[2]; // end of chunk expected
+    int len = sizeof(crlf);
+
+    DEBUG("HttpConn_%p reading end of chunk...\n", conn);
+    const int err = http_conn_recv_body(conn, crlf, &len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
+    if (len != (int)sizeof(crlf))
+    {
+        ERROR("HttpConn_%p not all data received: %d of %d\n",
+              conn, len, (int)sizeof(crlf));
+        return HTTP_ERR_READ;
+    }
+    if (crlf[0]!='\r' || crlf[1]!='\n')
+    {
+        ERROR("HttpConn_%p %02x%02x received instead of CRLF\n",
+              conn, crlf[0], crlf[1]);
+        return HTTP_ERR_FAILED;
+    }
+
+    TRACE("HttpConn_%p leave http_conn_recv_chunk_end()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
 }
 
@@ -1551,7 +1789,7 @@ int http_conn_send_request_header(struct HTTP_Conn *conn,
     }
     else if (0 == strcmp(name, "Content-Length"))
     {
-        http_conn_set_flag(conn, CONN_FLAG_REQUEST_COLEN_HEADER_SENT);
+        http_conn_set_flag(conn, CONN_FLAG_REQUEST_CONTENT_LENGTH_HEADER_SENT);
     }
     INFO("HttpConn_%p request header \"%s: %s\" buffered\n", conn, name, value);
     DEBUG("HttpConn_%p internal buffer{pos:%d, len:%d}\n",
@@ -1591,7 +1829,8 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
             if (HTTP_ERR_SUCCESS != err)
                 return err; // failed
         }
-        else if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_COLEN_HEADER_SENT) && conn->request.headers.content_length >= 0)
+        if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_CONTENT_LENGTH_HEADER_SENT)
+         && conn->request.headers.content_length >= 0)
         {
             // send automatic "Content-Length" header (if not send manually before)
             DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Content-Length");
@@ -1601,7 +1840,17 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
             if (HTTP_ERR_SUCCESS != err)
                 return err; // failed
         }
-        else if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_LINE_SENT))
+        if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_TRANSFER_ENCODING_HEADER_SENT)
+         && conn->request.headers.transfer_encoding != HTTP_TRANSFER_ENCODING_MISSING)
+        {
+            // send automatic "Transfer-Encoding" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Transfer-Encoding");
+            const char *value = http_header_transfer_encoding_string(conn->request.headers.transfer_encoding);
+            const int err = http_conn_send_request_header(conn, "Transfer-Encoding", value);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_LINE_SENT))
         {
             // send request line "METHOD URI PROTOCOL"
             DEBUG("HttpConn_%p sending request line...\n", conn);
@@ -1624,11 +1873,29 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
 
     if (len > 0)
     {
+        // have to send CHUNK line?
+        if (http_conn_is_request_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK length: %d bytes...\n", conn, len);
+            const int err = http_conn_send_chunk_len(conn, len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+
         // write data to buffer
         DEBUG("HttpConn_%p sending %d bytes of data...\n", conn, len);
         const int err = http_conn_send(conn, buf, len);
         if (HTTP_ERR_SUCCESS != err)
             return err; // failed
+
+        // have to write empty line - "chunk end" marker?
+        if (http_conn_is_request_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK end...\n", conn);
+            const int err = http_conn_send(conn, "\r\n", 2);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_send_request_body()\n", conn);
@@ -1656,6 +1923,15 @@ int http_conn_flush_request(struct HTTP_Conn *conn)
     const int err = http_conn_send_request_body(conn, "", 0);
     if (HTTP_ERR_SUCCESS != err)
         return err; // failed
+
+    // have to send final CHUNK?
+    if (http_conn_is_request_chunked(conn))
+    {
+        DEBUG("HttpConn_%p sending empty CHUNK...\n", conn);
+        const int err = http_conn_send(conn, "0\r\n\r\n", 5);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+    }
 
     // flush buffer
     if (ci->buf_len > 0)
@@ -1801,6 +2077,21 @@ int http_conn_recv_response_header(struct HTTP_Conn *conn,
     {
         INFO("HttpConn_%p EMPTY line received - end of response headers\n", conn);
         http_conn_set_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED); // can receive body now
+
+        // for chunked transfer encoding:
+        // once last header received
+        // read the first chunk length
+        if (http_conn_is_response_chunked(conn))
+        {
+            uint32_t chunk_len = 0;
+            const int err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+            conn->response.headers.content_length = chunk_len;
+            conn->internal.content_pos = 0; // reset read position
+        }
     }
 
     // handle common headers
@@ -1822,22 +2113,39 @@ int http_conn_recv_response_header(struct HTTP_Conn *conn,
             switch (conn->response.headers.connection)
             {
             case HTTP_CONNECTION_CLOSE:
-                INFO("HttpConn_%p \"%s\" connection header - should be closed\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be closed\n",
+                     conn, h_value, "Connection");
                 break;
 
             case HTTP_CONNECTION_KEEP_ALIVE:
-                INFO("HttpConn_%p \"%s\" connection header - should be kept alive\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be kept alive\n",
+                     conn, h_value, "Connection");
                 break;
 
             default:
-                WARN("HttpConn_%p unknown connection \"%s\" header, ignored\n",
-                     conn, h_value);
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Connection", h_value);
             }
         }
 
-        // TODO: more headers: "Content-Type", "Server", "Transfer-Encoding" etc...
+        // check "Transfer-Encoding" header
+        else if (0 == strcmp(h_name, "Transfer-Encoding"))
+        {
+            conn->response.headers.transfer_encoding = http_header_transfer_encoding_parse(h_value);
+            switch (conn->response.headers.transfer_encoding)
+            {
+            case HTTP_TRANSFER_ENCODING_CHUNKED:
+                INFO("HttpConn_%p \"%s\" %s header - should be chunked\n",
+                     conn, h_value, "Transfer-Encoding");
+                break;
+
+            default:
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Transfer-Encoding", h_value);
+            }
+        }
+
+        // TODO: more headers: "Content-Type", "Server" etc...
     }
 
     if (name) *name = h_name;
@@ -1894,6 +2202,14 @@ int http_conn_recv_response_body(struct HTTP_Conn *conn,
             return err; // failed
     }
 
+    // limit iteration length
+    const int rem = http_conn_response_content_can_recv(conn);
+    if (rem > 0 && rem < *len)
+    {
+        DEBUG("HttpConn_%p can't read more than %d bytes\n", conn, rem);
+        *len = rem;
+    }
+
     // receive via helper
     const int err = http_conn_recv_body(conn, buf, len);
     if (HTTP_ERR_SUCCESS != err)
@@ -1906,6 +2222,42 @@ int http_conn_recv_response_body(struct HTTP_Conn *conn,
         DEBUG("HttpConn_%p total %lld/%lld bytes read of response body\n",
               conn, (long long int)conn->internal.content_pos,
               (long long int)conn->response.headers.content_length);
+
+        // if chunked transfer encoding is used
+        // then at the end of chunk just read the "end" chunk marker (CRLF)
+        // at try to read another chunk line
+        if (http_conn_is_response_chunked(conn)
+         && 0 == http_conn_response_content_can_recv(conn))
+        {
+            DEBUG("HttpConn_%p reading end of chunk...\n", conn);
+            int err = http_conn_recv_chunk_end(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            // read next chunk or end of chunks
+            uint32_t chunk_len = 0;
+            err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            if (0 == chunk_len)
+            {
+                DEBUG("HttpConn_%p reading final end of chunk...\n", conn);
+                const int err = http_conn_recv_chunk_end(conn);
+                if (HTTP_ERR_SUCCESS != err)
+                    return err; // failed
+
+                // full body recevied
+                INFO("HttpConn_%p FULL response body received\n", conn);
+                // http_conn_set_flag(conn, CONN_FLAG_RESPONSE_BODY_RECEIVED);
+            }
+            else
+            {
+                INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+                conn->response.headers.content_length = chunk_len;
+                conn->internal.content_pos = 0; // reset read position
+            }
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_recv_response_body(%d)\n", conn, *len);
@@ -1920,6 +2272,10 @@ int http_conn_ignore_response_body(struct HTTP_Conn *conn)
 // see http_conn_ignore_request_body() for almost the same implementation
 {
     TRACE("HttpConn_%p enter http_conn_ignore_response_body()\n", conn);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+// TODO: if (http_conn_has_flag(CONN_FLAG_RESPONSE_BODY_RECEIVED))
+//        return HTTP_ERR_SUCCESS; // already received
 
     // have to receive rest of response headers?
     if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED))
@@ -1931,48 +2287,45 @@ int http_conn_ignore_response_body(struct HTTP_Conn *conn)
     }
 
     // ignore remaining body if "Content-Length" header is known
-    if (conn->response.headers.content_length > 0)
+    if (conn->response.headers.content_length > 0) // && !http_conn_has_flag(CONN_FLAG_RESPONSE_BODY_RECEIVED)
     {
-        int64_t rem = (conn->response.headers.content_length - conn->internal.content_pos);
-        if (rem > 0)
+        int rem;
+
+        INFO("HttpConn_%p ignoring response body...\n", conn);
+        while ((rem = http_conn_response_content_can_recv(conn)) > 0)
         {
-            uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
-            INFO("HttpConn_%p ignoring %lld bytes of response body...\n",
-                 conn, (long long int)rem);
-            while (rem > 0)
+            // need to grow? do we have space in working buffer?
+            if ((ci->buf_len - ci->buf_pos) < rem       // available < rem
+             && (HTTP_CONN_BUF_SIZE - ci->buf_len) > 0) // && space > 0
             {
-                int n = (rem <= (int64_t)sizeof(tmp_buf)) ? (int)rem : (int)sizeof(tmp_buf);
-                const int err = http_conn_recv_response_body(conn, tmp_buf, &n);
+                // getting some data into working buffer
+                const int err = http_conn_wbuf_grow(conn);
                 if (HTTP_ERR_SUCCESS != err)
                     return err; // failed
-                if (!n) // no data read
-                {
-                    // TODO: wait a bit and try again?
-                    ERROR("HttpConn_%p not ALL data received: %lld bytes remain\n",
-                          conn, (long long int)rem);
-                    return HTTP_ERR_READ; // failed
-                }
-                rem -= n;
             }
+
+            // minimum of available or remaining length
+            int n = (ci->buf_len - ci->buf_pos); // available
+            if (rem < n)
+                n = rem;
+            ci->buf_pos += n;   // ... just skip it
+            ci->content_pos += n;
+
+            const int err = http_conn_wbuf_shrink(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
         }
     }
     else
     {
-        uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
         INFO("HttpConn_%p ignoring ALL bytes of response body...\n", conn);
 
         while (1)
         {
-            int n = sizeof(tmp_buf);
-            const int err = http_conn_recv_response_body(conn, tmp_buf, &n);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-            if (!n) // no data read
-            {
-                // ERROR("HttpConn_%p not ALL data received\n", conn);
-                // return HTTP_ERR_READ; // failed
-                break; // done
-            }
+            // TODO: http_conn_wbuf_grow(conn);
+            // TODO: http_conn_wbuf_shrink(conn);
+            // TODO: read body until connection is closed
+            return HTTP_ERR_ILLEGAL; // not implemented yet
         }
     }
 
@@ -2199,6 +2552,21 @@ int http_conn_recv_request_header(struct HTTP_Conn *conn,
     {
         INFO("HttpConn_%p EMPTY line received - end of request headers\n", conn);
         http_conn_set_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED); // can receive body now
+
+        // for chunked transfer encoding:
+        // once last header received
+        // read the first chunk length
+        if (http_conn_is_request_chunked(conn))
+        {
+            uint32_t chunk_len = 0;
+            const int err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+            conn->request.headers.content_length = chunk_len;
+            conn->internal.content_pos = 0; // reset read position
+        }
     }
 
     // handle common headers
@@ -2217,21 +2585,38 @@ int http_conn_recv_request_header(struct HTTP_Conn *conn,
         else if (0 == strcmp(h_name, "Connection"))
         {
             conn->request.headers.connection = http_header_connection_parse(h_value);
-            switch (conn->response.headers.connection)
+            switch (conn->request.headers.connection)
             {
             case HTTP_CONNECTION_CLOSE:
-                INFO("HttpConn_%p \"%s\" connection header - should be closed\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be closed\n",
+                     conn, h_value, "Connection");
                 break;
 
             case HTTP_CONNECTION_KEEP_ALIVE:
-                INFO("HttpConn_%p \"%s\" connection header - should be kept alive\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be kept alive\n",
+                     conn, h_value, "Connection");
                 break;
 
             default:
-                WARN("HttpConn_%p unknown connection \"%s\" header, ignored\n",
-                     conn, h_value);
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Connection", h_value);
+            }
+        }
+
+        // check "Transfer-Encoding" header
+        else if (0 == strcmp(h_name, "Transfer-Encoding"))
+        {
+            conn->request.headers.transfer_encoding = http_header_transfer_encoding_parse(h_value);
+            switch (conn->request.headers.transfer_encoding)
+            {
+            case HTTP_TRANSFER_ENCODING_CHUNKED:
+                INFO("HttpConn_%p \"%s\" %s header - should be chunked\n",
+                     conn, h_value, "Transfer-Encoding");
+                break;
+
+            default:
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Transfer-Encoding", h_value);
             }
         }
 
@@ -2292,6 +2677,14 @@ int http_conn_recv_request_body(struct HTTP_Conn *conn,
             return err; // failed
     }
 
+    // limit iteration length
+    const int rem = http_conn_request_content_can_recv(conn);
+    if (rem > 0 && rem < *len)
+    {
+        DEBUG("HttpConn_%p can't read more than %d bytes\n", conn, rem);
+        *len = rem;
+    }
+
     // receive via helper
     const int err = http_conn_recv_body(conn, buf, len);
     if (HTTP_ERR_SUCCESS != err)
@@ -2304,6 +2697,42 @@ int http_conn_recv_request_body(struct HTTP_Conn *conn,
         DEBUG("HttpConn_%p total %lld/%lld bytes read of request body\n",
               conn, (long long int)conn->internal.content_pos,
               (long long int)conn->request.headers.content_length);
+
+        // if chunked transfer encoding is used
+        // then at the end of chunk just read the "end" chunk marker (CRLF)
+        // at try to read another chunk line
+        if (http_conn_is_request_chunked(conn)
+         && 0 == http_conn_request_content_can_recv(conn))
+        {
+            DEBUG("HttpConn_%p reading end of chunk...\n", conn);
+            int err = http_conn_recv_chunk_end(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            // read next chunk or end of chunks
+            uint32_t chunk_len = 0;
+            err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            if (0 == chunk_len)
+            {
+                DEBUG("HttpConn_%p reading final end of chunk...\n", conn);
+                const int err = http_conn_recv_chunk_end(conn);
+                if (HTTP_ERR_SUCCESS != err)
+                    return err; // failed
+
+                // full body recevied
+                INFO("HttpConn_%p FULL request body received\n", conn);
+                // http_conn_set_flag(conn, CONN_FLAG_REQUEST_BODY_RECEIVED);
+            }
+            else
+            {
+                INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+                conn->request.headers.content_length = chunk_len;
+                conn->internal.content_pos = 0; // reset read position
+            }
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_recv_request_body(%d)\n", conn, *len);
@@ -2318,6 +2747,10 @@ int http_conn_ignore_request_body(struct HTTP_Conn *conn)
 // see http_conn_ignore_response_body() for almost the same implementation
 {
     TRACE("HttpConn_%p enter http_conn_ignore_request_body()\n", conn);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+// TODO: if (http_conn_has_flag(CONN_FLAG_REQUEST_BODY_RECEIVED))
+//        return HTTP_ERR_SUCCESS; // already received
 
     // have to receive rest of request headers?
     if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED))
@@ -2329,34 +2762,46 @@ int http_conn_ignore_request_body(struct HTTP_Conn *conn)
     }
 
     // ignore remaining body if "Content-Length" header is known
-    if (conn->request.headers.content_length > 0)
+    if (conn->request.headers.content_length > 0) // && !http_conn_has_flag(CONN_FLAG_REQUEST_BODY_RECEIVED)
     {
-        int64_t rem = (conn->request.headers.content_length - conn->internal.content_pos);
-        if (rem > 0)
+        int rem;
+
+        INFO("HttpConn_%p ignoring request body...\n", conn);
+        while ((rem = http_conn_request_content_can_recv(conn)) > 0)
         {
-            uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
-            INFO("HttpConn_%p ignoring %lld bytes of request body...\n",
-                 conn, (long long int)rem);
-            while (rem > 0)
+            // need to grow? do we have space in working buffer?
+            if ((ci->buf_len - ci->buf_pos) < rem       // available < rem
+             && (HTTP_CONN_BUF_SIZE - ci->buf_len) > 0) // && space > 0
             {
-                int n = (rem <= (int64_t)sizeof(tmp_buf)) ? (int)rem : (int)sizeof(tmp_buf);
-                const int err = http_conn_recv_request_body(conn, tmp_buf, &n);
+                // getting some data into working buffer
+                const int err = http_conn_wbuf_grow(conn);
                 if (HTTP_ERR_SUCCESS != err)
                     return err; // failed
-                if (!n) // no data read
-                {
-                    // TODO: wait a bit and try again?
-                    ERROR("HttpConn_%p not ALL data received: %lld bytes remain\n",
-                          conn, (long long int)rem);
-                    return HTTP_ERR_READ; // failed
-                }
-                rem -= n;
             }
+
+            // minimum of available or remaining length
+            int n = (ci->buf_len - ci->buf_pos); // available
+            if (rem < n)
+                n = rem;
+            ci->buf_pos += n;   // ... just skip it
+            ci->content_pos += n;
+
+            const int err = http_conn_wbuf_shrink(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
         }
     }
     else
     {
-        // we don't know how much to ignore
+        INFO("HttpConn_%p ignoring ALL bytes of request body...\n", conn);
+
+        while (1)
+        {
+            // TODO: http_conn_wbuf_grow(conn);
+            // TODO: http_conn_wbuf_shrink(conn);
+            // TODO: read body until connection is closed
+            return HTTP_ERR_ILLEGAL; // not implemented yet
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_ignore_request_body()\n", conn);
@@ -2381,7 +2826,7 @@ int http_conn_send_response_status(struct HTTP_Conn *conn)
     }
 
     // have to receive request headers & body?
-    if (1) // !http_conn_has_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED))
+    if (1) // !http_conn_has_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED))
     {
         DEBUG("HttpConn_%p ensure full request received...\n", conn);
         const int err = http_conn_ignore_request_body(conn);
@@ -2492,7 +2937,11 @@ int http_conn_send_response_header(struct HTTP_Conn *conn,
     // check if known headers are sent
     if (0 == strcmp(name, "Content-Length"))
     {
-        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_COLEN_HEADER_SENT);
+        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_CONTENT_LENGTH_HEADER_SENT);
+    }
+    else if (0 == strcmp(name, "Transfer-Encoding"))
+    {
+        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_TRANSFER_ENCODING_HEADER_SENT);
     }
     INFO("HttpConn_%p response header \"%s: %s\" buffered\n", conn, name, value);
     DEBUG("HttpConn_%p internal buffer{pos:%d, len:%d}\n",
@@ -2523,7 +2972,8 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
     if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_HEADERS_SENT))
     {
         // have to send known headers or resposne status
-        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_COLEN_HEADER_SENT) && conn->response.headers.content_length >= 0)
+        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_CONTENT_LENGTH_HEADER_SENT)
+         && conn->response.headers.content_length >= 0)
         {
             // send automatic "Content-Length" header (if not send manually before)
             DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Content-Length");
@@ -2533,7 +2983,17 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
             if (HTTP_ERR_SUCCESS != err)
                 return err; // failed
         }
-        else if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_STATUS_SENT))
+        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_TRANSFER_ENCODING_HEADER_SENT)
+         && conn->response.headers.transfer_encoding != HTTP_TRANSFER_ENCODING_MISSING)
+        {
+            // send automatic "Transfer-Encoding" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Transfer-Encoding");
+            const char *value = http_header_transfer_encoding_string(conn->response.headers.transfer_encoding);
+            const int err = http_conn_send_request_header(conn, "Transfer-Encoding", value);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_STATUS_SENT))
         {
             // send response status line "PROTOCOL STATUS REASON"
             DEBUG("HttpConn_%p sending response status line...\n", conn);
@@ -2554,11 +3014,29 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
 
     if (len > 0)
     {
+        // have to send CHUNK line?
+        if (http_conn_is_response_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK length: %d bytes...\n", conn, len);
+            const int err = http_conn_send_chunk_len(conn, len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+
         // write data to buffer
         DEBUG("HttpConn_%p sending %d bytes of data...\n", conn, len);
         const int err = http_conn_send(conn, buf, len);
         if (HTTP_ERR_SUCCESS != err)
             return err; // failed
+
+        // have to write empty line - "chunk end" marker?
+        if (http_conn_is_response_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK end...\n", conn);
+            const int err = http_conn_send(conn, "\r\n", 2);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_send_response_body()\n", conn);
@@ -2586,6 +3064,15 @@ int http_conn_flush_response(struct HTTP_Conn *conn)
     const int err = http_conn_send_response_body(conn, "", 0);
     if (HTTP_ERR_SUCCESS != err)
         return err; // failed
+
+    // have to send final CHUNK?
+    if (http_conn_is_response_chunked(conn))
+    {
+        DEBUG("HttpConn_%p sending empty CHUNK...\n", conn);
+        const int err = http_conn_send(conn, "0\r\n\r\n", 5);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+    }
 
     // flush buffer
     if (ci->buf_len > 0)
@@ -3325,7 +3812,7 @@ done:
 
     if (conn)
     {
-        INFO("HttpClient_%p request \"%s %s/%s\" done with \"%d %s\" status in %d ms\n",
+        INFO("HttpClient_%p request \"%s %s%s\" done with \"%d %s\" status in %d ms\n",
              client, http_conn_get_request_method(conn),
              http_conn_get_request_host(conn), http_conn_get_request_uri(conn),
              http_conn_get_response_status(conn), http_conn_get_response_reason(conn),

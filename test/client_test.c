@@ -28,7 +28,7 @@ static int test_print_response(int err, struct HTTP_Conn *conn, void *user_data)
     INFO("connected, preparing request...\n");
 
     // http_conn_set_request_proto(conn, HTTP_PROTO_1_0);
-    http_conn_add_request_uri(conn, "?hello=yes");
+    // http_conn_add_request_uri(conn, "?hello=yes");
     http_conn_send_request_header(conn, "Agent", "tinyhttp/0.1");
     http_conn_send_request_header(conn, "Accept", "*/*");
     // http_conn_set_request_uri(conn, "/index.html", -1);
@@ -40,11 +40,16 @@ static int test_print_response(int err, struct HTTP_Conn *conn, void *user_data)
     INFO("request sent, waiting for response...\n");
 
     // check response status
-    if (!!http_conn_recv_response_status(conn)
-       || http_conn_get_response_status(conn) != HTTP_STATUS_OK)
+    if (!!http_conn_recv_response_status(conn))
     {
-        WARN("failed to receive status or bad status\n");
+        WARN("failed to receive status\n");
         return -1;
+    }
+    if (http_conn_get_response_status(conn) != HTTP_STATUS_OK)
+    {
+        WARN("unexpected status: %d\n", http_conn_get_response_status(conn));
+        http_conn_ignore_response_body(conn);
+        return -1; // failed
     }
 
     // ignore rest of headers
@@ -54,26 +59,22 @@ static int test_print_response(int err, struct HTTP_Conn *conn, void *user_data)
         return -1;
     }
 
-    int64_t rem = conn->response.headers.content_length;
-    if (rem > 0)
+    INFO("reading response body...\n");
+    uint8_t tmp_buf[4*1024];
+    int rem;
+    while ((rem = http_conn_response_content_can_recv(conn)) > 0)
     {
-        INFO("reading %lld bytes of response body...\n",
-             (long long int)rem);
-        uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
-        while (rem > 0)
-        {
-            int n = (rem <= (int64_t)sizeof(tmp_buf)) ? (int)rem : (int)sizeof(tmp_buf);
-            const int err = http_conn_recv_response_body(conn, tmp_buf, &n);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-            if (!n)
-                break;
+        if (rem > (int)sizeof(tmp_buf))
+            rem = sizeof(tmp_buf);
 
-            INFO("*** %d bytes read ***\n", n);
-            rem -= n;
+        const int err = http_conn_recv_response_body(conn, tmp_buf, &rem);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+        if (!rem)
+            break;
 
-            fwrite(tmp_buf, 1, n, stdout); // print to stdout
-        }
+        INFO("*** %d bytes read ***\n", rem);
+        fwrite(tmp_buf, 1, rem, stdout); // print to stdout
     }
 
     INFO("*** request done\n");
@@ -112,12 +113,13 @@ int main(void)
     // TODO: http_client_set_cipher_list(client, "???");
     // wolfSSL_CTX_UseSNI(client->ctx, 0, "reqres.in", 9);
 
-    //wolfSSL_CTX_load_verify_locations(client->ctx, NULL, "/etc/ssl/certs/");
-    http_client_load_verify_cert_file(client, "/etc/ssl/certs/DST_Root_CA_X3.pem"); // www.howsmyssl.com
+    wolfSSL_CTX_load_verify_locations(client->ctx, NULL, "/etc/ssl/certs/");
+    //http_client_load_verify_cert_file(client, "/etc/ssl/certs/DST_Root_CA_X3.pem"); // www.howsmyssl.com
     //http_client_load_verify_cert_file(client, "/etc/ssl/certs/USERTrust_RSA_Certification_Authority.pem"); // reqres.in + jsonplaceholder.typicode.com
     //http_client_load_verify_cert_file(client, "/etc/ssl/certs/Baltimore_CyberTrust_Root.pem"); // fakerestapi.azurewebsites.net
 
-    http_client_get(client, "https://www.howsmyssl.com/a/check",
+    http_client_get(client, "https://www.yandex.ru/",
+                    //"https://www.howsmyssl.com/a/check",
                     //"https://fakerestapi.azurewebsites.net/api/Books/1",
                     //"https://jsonplaceholder.typicode.com/posts/1",
                     //"https://reqres.in/api/user/1",
