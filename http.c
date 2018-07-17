@@ -3721,7 +3721,8 @@ int http_client_do(struct HTTP_Client *client,
     const char *proto = 0;
     int         proto_len = 0;
     const char *host = 0;
-    int         host_len = 0;
+    int         host_len = 0;       // host
+    int         hostport_len = 0;   // host:port
     int         port = 0; // invalid
     const char *uri = 0;
     int         uri_len = 0;
@@ -3732,7 +3733,7 @@ int http_client_do(struct HTTP_Client *client,
 
     // parse URL
     err = http_parse_url(url, &proto, &proto_len,
-                         &host, &host_len, &port,
+                         &host, &host_len, &hostport_len, &port,
                          &uri, &uri_len);
     if (HTTP_ERR_SUCCESS != err)
         goto done;
@@ -3796,7 +3797,7 @@ int http_client_do(struct HTTP_Client *client,
     // prepare request
     http_conn_set_request_method(conn, method);
     http_conn_set_request_proto(conn, HTTP_PROTO_1_1);
-    err = http_conn_set_request_host(conn, host, host_len);
+    err = http_conn_set_request_host(conn, host, hostport_len);
     if (HTTP_ERR_SUCCESS != err)
         goto done; // failed
     err = http_conn_set_request_uri(conn, uri, uri_len);
@@ -4561,7 +4562,8 @@ int http_server_stop(struct HTTP_Server *server)
  */
 int http_parse_url(const char *url,
                    const char **proto, int *proto_len,
-                   const char **host, int *host_len, int *port,
+                   const char **host, int *host_len,
+                   int *hostport_len, int *port,
                    const char **path, int *path_len)
 {
     // will be used to port auto-detection later
@@ -4594,12 +4596,14 @@ int http_parse_url(const char *url,
         const int len = strcspn(url, ":/?#");
         if (host) *host = url;
         if (host_len) *host_len = len;
+        if (hostport_len) *hostport_len = len;
         url += len;
     }
     else
     {
         if (host) *host = 0;
         if (host_len) *host_len = 0;
+        if (hostport_len) *hostport_len = 0;
     }
 
     // port [optional]
@@ -4608,6 +4612,7 @@ int http_parse_url(const char *url,
         char *end = 0;
         const int p = strtol(url+1, &end, 10);
         if (port) *port = p;
+        if (hostport_len) *hostport_len += (end-url);
         url = end;
     }
     else if (port) // port auto-detection

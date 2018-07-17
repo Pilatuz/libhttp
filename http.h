@@ -1925,6 +1925,7 @@ int http_server_stop(struct HTTP_Server *server);
  * @param[out] proto_len Protocol length.
  * @param[out] host Target host position.
  *                  Note, this string is not NULL-terminated!
+ * @param[out] hostport_len Target host+port length.
  * @param[out] host_len Target host length.
  * @param[out] port Port number.
  *                  If no port number is present it is detected based on protocol.
@@ -1936,7 +1937,8 @@ int http_server_stop(struct HTTP_Server *server);
  */
 int http_parse_url(const char *url,
                    const char **proto, int *proto_len,
-                   const char **host, int *host_len, int *port,
+                   const char **host, int *host_len,
+                   int *hostport_len, int *port,
                    const char **path, int *path_len);
 
 
