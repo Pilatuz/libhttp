@@ -3243,12 +3243,15 @@ void http_client_free(struct HTTP_Client *client)
 /**
  * @brief Find and take connection from cache.
  * @param[in] client HTTP client.
+ * @param[in] secure The secure connection flag.
  * @param[in] ipv4 Target IPv4 address.
  * @param[in] port Target port number.
  * @return Found connection or `NULL`.
  */
 static struct HTTP_Conn* http_client_conn_cache_take(struct HTTP_Client *client,
-                                                     uint32_t ipv4, int port)
+                                                     int secure,
+                                                     uint32_t ipv4,
+                                                     int port)
 {
     // TODO: lock mutex
 
@@ -3260,6 +3263,8 @@ static struct HTTP_Conn* http_client_conn_cache_take(struct HTTP_Client *client,
         if (!conn)
             continue;
 
+        if ((conn->ssl != 0) != (secure != 0))
+            continue; // secure mismatch
         if (conn->remote_ipv4 != ipv4)
             continue; // IP address mismatch
         if (conn->remote_port != port)
@@ -3518,6 +3523,7 @@ int http_client_set_cipher_list(struct HTTP_Client *client,
 
 
 /**
+         client, host_len, host, PRINT_IPV4_ADDR(*addr));
  * @brief Connect to a host.
  *
  * This is helper function.
@@ -3626,7 +3632,7 @@ static int http_client_connect(struct HTTP_Client *client,
     struct HTTP_Conn *conn;
 #if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // first, try to use available cached connection
-    conn = http_client_conn_cache_take(client,
+    conn = http_client_conn_cache_take(client, secure,
                                        addr.sin_addr.s_addr,
                                        port_n2h(addr.sin_port));
     if (conn)
