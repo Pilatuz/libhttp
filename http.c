@@ -3170,14 +3170,14 @@ int http_client_new(enum SSL_Proto proto, struct HTTP_Client **client_)
     }
     DEBUG("HttpClient_%p SSL context SSL_CTX_%p created\n", client, client->ctx);
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // reset the whole connection cache
     memset(client->conn_cache, 0, sizeof(client->conn_cache));
     DEBUG("HttpClient_%p reset connection cache of %d items\n",
           client, HTTP_CLIENT_CONN_CACHE_SIZE);
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
     // reset the whole resolve cache
     memset(client->resolve_cache, 0, sizeof(client->resolve_cache));
     DEBUG("HttpClient_%p reset resolve cache of %d items\n",
@@ -3203,7 +3203,7 @@ void http_client_free(struct HTTP_Client *client)
         return; // nothing to release
     }
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // release all cached connections
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
@@ -3217,7 +3217,7 @@ void http_client_free(struct HTTP_Client *client)
     }
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
     // there is nothing to release in resolve cache
 #endif // HTTP_RESOLVE_CACHE_SIZE
 
@@ -3238,7 +3238,7 @@ void http_client_free(struct HTTP_Client *client)
 }
 
 // connection cache
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
 
 /**
  * @brief Find and take connection from cache.
@@ -3327,7 +3327,7 @@ static void http_client_conn_cache_save(struct HTTP_Client *client,
 
 
 // resolve cache
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
 
 /**
  * @brief Calculate digest on host name.
@@ -3624,7 +3624,7 @@ static int http_client_connect(struct HTTP_Client *client,
     } // resolve host name
 
     struct HTTP_Conn *conn;
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // first, try to use available cached connection
     conn = http_client_conn_cache_take(client,
                                        addr.sin_addr.s_addr,
@@ -3656,7 +3656,7 @@ static int http_client_connect(struct HTTP_Client *client,
         ERROR("HttpClient_%p FAILED to connect: (%d) %s\n",
               client, errno, strerror(errno));
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
         // if connect() failed then there is no sense to
         // cache that IP address, so just remove it...
         const int n_removed = http_client_resolve_cache_remove(client, addr.sin_addr.s_addr);
@@ -3699,7 +3699,7 @@ static int http_client_connect(struct HTTP_Client *client,
              wolfSSL_get_version(conn->ssl));
     }
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     }
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
@@ -3819,11 +3819,17 @@ done:
              http_conn_get_response_status(conn), http_conn_get_response_reason(conn),
              misc_time_ms() - t_start);
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
         if (HTTP_ERR_SUCCESS != err)
         {
             DEBUG("HttpConn_%p cannot be cached: %s\n",
                   conn, "finished with error");
+            goto release;
+        }
+        if (http_conn_has_flag(conn, HTTP_CONN_DO_NOT_CACHE))
+        {
+            DEBUG("HttpConn_%p cannot be cached: %s\n",
+                  conn, "marked with DO-NOT-CACHE flag");
             goto release;
         }
         if (HTTP_CONNECTION_CLOSE == conn->response.headers.connection)

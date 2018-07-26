@@ -1336,7 +1336,7 @@ struct HTTP_Client
      */
     WOLFSSL_CTX *ctx;
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
 
     /**
      * @brief Connection cache entry.
@@ -1355,7 +1355,7 @@ struct HTTP_Client
     // TODO: connection cache mutex
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
 /**
  * @brief SHA-1 is used as host digest.
  * @see resolve_cache
@@ -1528,7 +1528,7 @@ int http_client_set_cipher_list(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- * @return Non-zero on success.
+ * @return Zero on success.
  *
  * @see HTTP_ConnFlags
  * @relates HTTP_Client
@@ -1548,7 +1548,7 @@ int http_client_do(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- * @return Non-zero on success.
+ * @return Zero on success.
  *
  * @see http_client_do()
  * @see HTTP_ConnFlags
@@ -1572,7 +1572,7 @@ static inline int http_client_get(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- * @return Non-zero on success.
+ * @return Zero on success.
  *
  * @see http_client_do()
  * @see HTTP_ConnFlags
@@ -1596,7 +1596,7 @@ static inline int http_client_put(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- * @return Non-zero on success.
+ * @return Zero on success.
  *
  * @see http_client_do()
  * @see HTTP_ConnFlags
@@ -1620,7 +1620,7 @@ static inline int http_client_post(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- * @return Non-zero on success.
+ * @return Zero on success.
  *
  * @see http_client_do()
  * @see HTTP_ConnFlags
