@@ -13,94 +13,91 @@
 extern "C" {
 #endif // __cplusplus
 
-/* Cheat-Sheet
- *
- * to test server:
- * `curl --cacert server-cert.pem -H "Text: Hello" -s "https://www.wolfssl.com:8080/version"`
- *
- * to convert certificates from CRT (actually PEM) to binary DER format:
- * `for name in *.crt; do openssl x509 -inform PEM -outform DER -in $name -out $name.der; done`
- *
- * to convert all certificates to C "include" file:
- * `echo "# all certificates" > cert.c; for name in *.der; do xxd -i $name >> cert.c; done`
- *
- * # apply all certificates:
- * echo "void load_all(WOLFSSL_CTX *ctx) {" >> cert.c;
- * for name in `cat cert.h | sed -n "s|unsigned char \(.*\)\[\] = {|\1|p"`; do echo "  wolfSSL_CTX_load_verify_buffer(ctx, ${name}, ${name}_len, WOLFSSL_FILETYPE_ASN1);" >> cert.c; done
- * echo "}" >> cert.c
- */
-
-/* TODO
- *
- * - short tutorial with examples!
- * + time performance metrics for client/server requests
- * - client: dedicated thread per each request
- * - client: limit the maximum number of connections
- * - client: limit the total request execution time
- * - client: support for chunked transfer
- * - client: support basic authentication (strip username/password from URL)
- * + server: support both http and https at the same time
- * - server: dedicated thread per each request
- * - server: dedicated thread for listen+accept
- * - server: limit the maximum number of connections
- * - server: limit the total request execution time
- *
- * wrappers for (corresponding flags to http_client_do()):
- * - wolfSSL_CTX_UseSNI()
- * - wolfSSL_UseSNI()
- * - wolfSSL_check_domain_name()
- */
-
-
-/*
- * HTTP connection buffer size.
- *
- * Connection buffer should be large enough to fit whole request line,
- * response status line and any header line.
- */
+// connection working buffer size
 #ifndef HTTP_CONN_BUF_SIZE
-// fallback to default connection buffer size
-# define HTTP_CONN_BUF_SIZE (4096)
+/**
+ * @brief HTTP connection working buffer size.
+ *
+ * The same internal working buffer is used for sending and receiving purposes.
+ * For HTTP client the request is prepared first, once request is sent the
+ * response is received in the same buffer. For HTTP server the request is
+ * received first, then response is prepared using the same buffer.
+ *
+ * Working buffer should be large enough to fit whole request line,
+ * response status line and any request/response header line. If any of these
+ * lines is bigger than working buffer size then the whole connection
+ * will be failed with an error code.
+ *
+ * @relates HTTP_Client
+ */
+# define HTTP_CONN_BUF_SIZE (3816) // fallback to default connection buffer size
+                                   // keep sizeof(HTTP_Conn) == 4096!
 #elif HTTP_CONN_BUF_SIZE < 256
 # error HTTP connection buffer too small!
 #endif // HTTP_CONN_BUF_SIZE
 
 
-/*
- * HTTP resolve cache size.
- *
- * Zero to disable cache.
- */
+// resolve cache size
 #ifndef HTTP_RESOLVE_CACHE_SIZE
-// fallback to default resolve cache size
-# define HTTP_RESOLVE_CACHE_SIZE (16)
+/**
+ * @brief HTTP resolve cache size.
+ *
+ * This is the number of resolve cache entries in the HTTP client.
+ * Each entry contains host name (or digest) and the IPv4 address.
+ * If resolve cache entry already exists then no actual host resolving performed.
+ *
+ * Define as zero to disable cache.
+ *
+ * @see @ref resolve_cache
+ * @relates HTTP_Client
+ */
+# define HTTP_RESOLVE_CACHE_SIZE (12) // fallback to default resolve cache size
+                                      // keep sizeof(HTTP_Client) < 512!
 #endif // HTTP_RESOLVE_CACHE_SIZE
 
 
-/*
- * HTTP client connection cache size.
- *
- * Zero to disable cache.
- */
+// connection cache size
 #ifndef HTTP_CLIENT_CONN_CACHE_SIZE
-// fallback to default client connection cache size
-# define HTTP_CLIENT_CONN_CACHE_SIZE (16)
+/**
+ * @brief HTTP client connection cache size.
+ *
+ * This is the number of connection cache entries in the HTTP client.
+ * Once request is completed the "keep-alive" connections are placed into
+ * that cache to be reused later.
+ *
+ * Define as zero to disable cache.
+ *
+ * @see @ref connection_cache
+ * @relates HTTP_Client
+ */
+# define HTTP_CLIENT_CONN_CACHE_SIZE (16) // fallback to default client connection cache size
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
 
 /**
  * @brief SSL protocol versions.
  *
+ * One of these contants should be specified when HTTP_Client or HTTP_Server
+ * is created. It is recommeded to use at least TLS v1.2.
+ *
  * @see ssl_proto_string()
+ * @see http_client_new()
+ * @see http_server_new()
  */
 enum SSL_Proto
 {
+#ifdef WOLFSSL_ALLOW_SSLV3
     SSL_PROTO_SSLv3,                /**< @brief SSL v3 (obsolete) */
+#endif // WOLFSSL_ALLOW_SSLV3
+#ifdef WOLFSSL_ALLOW_TLSV10
     SSL_PROTO_TLSv1_0,              /**< @brief TLS v1.0 (obsolete) */
+#endif // WOLFSSL_ALLOW_TLSV10
     SSL_PROTO_TLSv1_1,              /**< @brief TLS v1.1 (obsolete) */
     SSL_PROTO_TLSv1_2,              /**< @brief TLS v1.2 */
+#ifdef WOLFSSL_TLS13
     SSL_PROTO_TLSv1_3,              /**< @brief TLS v1.3 (draft) */
-    SSL_PROTO_TLSv1_2_TO_SSLv3,     /**< @brief Any of TLS v1.2 to SSL v3 */
+#endif // WOLFSSL_TLS13
+    SSL_PROTO_TLSv1_2_TO_SSLv3      /**< @brief Any of TLS v1.2 to SSL v3 */
 };
 
 
@@ -111,7 +108,8 @@ enum SSL_Proto
  *
  * @param[in] proto One of SSL protocol.
  * @return String representation of SSL protocol.
- * @see SSL_Proto enum.
+ *
+ * @see SSL_Proto
  */
 const char* ssl_proto_string(enum SSL_Proto proto);
 
@@ -119,18 +117,24 @@ const char* ssl_proto_string(enum SSL_Proto proto);
 /**
  * @brief HTTP methods.
  *
+ * With the HTTP_Client the HTTP method should be specified just before
+ * sending the HTTP request line.
+ *
  * @see http_method_string()
+ * @see http_conn_get_request_method()
+ * @see http_conn_set_request_method()
+ * @see HTTP_Request
  */
 enum HTTP_Method
 {
-    HTTP_UNKNOWN_METHOD = 0,    /**< @brief Unknown or unsupported HTTP method. */
-    HTTP_GET,                   /**< @brief `GET` HTTP method. */
-    HTTP_PUT,                   /**< @brief `PUT` HTTP method. */
-    HTTP_POST,                  /**< @brief `POST` HTTP method. */
-    HTTP_HEAD,                  /**< @brief `HEAD` HTTP method. */
-    HTTP_DELETE,                /**< @brief `DELETE` HTTP method. */
-    HTTP_CONNECT,               /**< @brief `CONNECT` HTTP method. */
-    HTTP_OPTIONS                /**< @brief `OPTIONS` HTTP method. */
+    HTTP_UNKNOWN_METHOD = 0,    /**< @brief Unknown or unsupported HTTP method */
+    HTTP_GET,                   /**< @brief `GET` HTTP method */
+    HTTP_PUT,                   /**< @brief `PUT` HTTP method */
+    HTTP_POST,                  /**< @brief `POST` HTTP method */
+    HTTP_HEAD,                  /**< @brief `HEAD` HTTP method */
+    HTTP_DELETE,                /**< @brief `DELETE` HTTP method */
+    HTTP_CONNECT,               /**< @brief `CONNECT` HTTP method */
+    HTTP_OPTIONS                /**< @brief `OPTIONS` HTTP method */
 };
 
 
@@ -141,7 +145,8 @@ enum HTTP_Method
  *
  * @param[in] method One of HTTP method.
  * @return String representation of HTTP method.
- * @see HTTP_Method enum.
+ *
+ * @see HTTP_Method
  */
 const char* http_method_string(enum HTTP_Method method);
 
@@ -149,13 +154,22 @@ const char* http_method_string(enum HTTP_Method method);
 /**
  * @brief HTTP protocol versions.
  *
+ * HTTP protocol should be specified in HTTP request line and in the
+ * HTTP response status line.
+ *
  * @see http_proto_string()
+ * @see http_conn_get_request_proto()
+ * @see http_conn_set_request_proto()
+ * @see http_conn_get_response_proto()
+ * @see http_conn_set_response_proto()
+ * @see HTTP_Response
+ * @see HTTP_Request
  */
 enum HTTP_Proto
 {
-    HTTP_UNKNOWN_PROTO = 0,     /**< @brief Unknown or unsupported HTTP protocol. */
-    HTTP_PROTO_1_0 = 10,        /**< @brief `HTTP/1.0` protocol. */
-    HTTP_PROTO_1_1 = 11         /**< @brief `HTTP/1.1` protocol. */
+    HTTP_UNKNOWN_PROTO = 0,     /**< @brief Unknown or unsupported HTTP protocol */
+    HTTP_PROTO_1_0 = 10,        /**< @brief `HTTP/1.0` protocol */
+    HTTP_PROTO_1_1 = 11         /**< @brief `HTTP/1.1` protocol */
 };
 
 
@@ -167,13 +181,21 @@ enum HTTP_Proto
  * @param[in] proto One of HTTP protocol version.
  * @return String representation of HTTP protocol version.
  *
- * @see HTTP_Proto enum.
+ * @see HTTP_Proto
  */
 const char* http_proto_string(enum HTTP_Proto proto);
 
 
 /**
  * @brief HTTP status codes.
+ *
+ * A set of common HTTP status codes. Note not all codes are presented here.
+ * This code is used in HTTP response status line.
+ *
+ * @see http_status_reason()
+ * @see http_conn_get_response_status()
+ * @see http_conn_set_response_status()
+ * @see HTTP_Response
  */
 enum HTTP_Status
 {
@@ -200,7 +222,7 @@ enum HTTP_Status
 
     HTTP_STATUS_INTERNAL_SERVER_ERROR   = 500, /**< @brief 500 Internal Server Error. */
     HTTP_STATUS_NOT_IMPLEMENTED         = 501, /**< @brief 501 Not Implemented. */
-    HTTP_STATUS_SERVICE_UNAVAILABLE     = 503, /**< @brief 503 Service Unavailable. */
+    HTTP_STATUS_SERVICE_UNAVAILABLE     = 503  /**< @brief 503 Service Unavailable. */
 };
 
 
@@ -208,71 +230,89 @@ enum HTTP_Status
  * @brief Get default reason phrase for HTTP status.
  * @param[in] status HTTP status.
  * @return Reason phrase or `NULL` if status is unknown.
+ *
+ * @see HTTP_Status
  */
 const char* http_status_reason(int status);
 
 
 /**
  * @brief HTTP error codes.
+ *
+ * Set of error codes that can be reported by this library functions.
  */
 enum HTTP_Error
 {
     // generic
-    HTTP_ERR_SUCCESS    =  0,
-    HTTP_ERR_FAILED     = -1,
-    HTTP_ERR_ILLEGAL    = -2,
-    HTTP_ERR_NO_MEMORY  = -3,
-    HTTP_ERR_READ       = -4,
-    HTTP_ERR_WRITE      = -5,
-    HTTP_ERR_SOCKET     = -6,
-    HTTP_ERR_BIND       = -7,
-    HTTP_ERR_ACCEPT     = -8,
-    HTTP_ERR_LISTEN     = -9,
-    HTTP_ERR_CONNECT    = -10,
-    HTTP_ERR_RESOLVE    = -11,
-    HTTP_ERR_HANDSHAKE  = -12,
-    HTTP_ERR_NO_DATA    = -13,
-    HTTP_ERR_NOT_FOUND  = -14,
+    HTTP_ERR_SUCCESS    =  0,   /**< @brief No error */
+    HTTP_ERR_FAILED     = -1,   /**< @brief Generic failure */
+    HTTP_ERR_ILLEGAL    = -2,   /**< @brief Illegel usage */
+    HTTP_ERR_NO_MEMORY  = -3,   /**< @brief No memory available */
+    HTTP_ERR_READ       = -4,   /**< @brief Read/receive error */
+    HTTP_ERR_WRITE      = -5,   /**< @brief Write/send error */
+    HTTP_ERR_SOCKET     = -6,   /**< @brief Socket error */
+    HTTP_ERR_BIND       = -7,   /**< @brief Bind error */
+    HTTP_ERR_ACCEPT     = -8,   /**< @brief Accept error */
+    HTTP_ERR_LISTEN     = -9,   /**< @brief Listen error */
+    HTTP_ERR_CONNECT    = -10,  /**< @brief Connect error */
+    HTTP_ERR_RESOLVE    = -11,  /**< @brief Resolve error */
+    HTTP_ERR_HANDSHAKE  = -12,  /**< @brief Handshake error */
+    HTTP_ERR_NO_DATA    = -13,  /**< @brief No data error */
+    HTTP_ERR_NOT_FOUND  = -14,  /**< @brief Not found error */
 
     // common
-    HTTP_ERR_BAD_CERT               = -101,
-    HTTP_ERR_BAD_PRIVATE_KEY        = -102,
-    HTTP_ERR_BAD_CIPHER_LIST        = -103,
-    HTTP_ERR_BAD_URL_NO_PORT        = -104,
-    HTTP_ERR_BAD_URL_NO_HOST        = -105,
-    HTTP_ERR_BAD_URL_NO_URI         = -106,
-    HTTP_ERR_BAD_URL_PROTOCOL       = -107,
-    HTTP_ERR_BAD_HEADER_NO_COLON    = -108,
+    HTTP_ERR_BAD_CERT               = -101, /**< @brief Bad certificate */
+    HTTP_ERR_BAD_PRIVATE_KEY        = -102, /**< @brief Bad private key */
+    HTTP_ERR_BAD_CIPHER_LIST        = -103, /**< @brief Bad cipher list */
+    HTTP_ERR_BAD_URL_NO_PORT        = -104, /**< @brief Bad URL: no port */
+    HTTP_ERR_BAD_URL_NO_HOST        = -105, /**< @brief Bad URL: no host */
+    HTTP_ERR_BAD_URL_NO_URI         = -106, /**< @brief Bad URL: no URI path */
+    HTTP_ERR_BAD_URL_PROTOCOL       = -107, /**< @brief Bad URL protocol */
+    HTTP_ERR_BAD_HEADER_NO_COLON    = -108, /**< @brief No header colon */
+    HTTP_ERR_BAD_CHUNK_NO_LENGTH    = -109, /**< @brief No chunk length */
 
     // request/response
-    HTTP_ERR_BAD_REQUEST_NO_METHOD      = -200,
-    HTTP_ERR_BAD_REQUEST_NO_URI         = -201,
-    HTTP_ERR_BAD_RESPONSE_NO_PROTOCOL   = -210,
-    HTTP_ERR_BAD_RESPONSE_NO_STATUS     = -211,
+    HTTP_ERR_BAD_REQUEST_NO_METHOD      = -200, /**< @brief Bad request: no method */
+    HTTP_ERR_BAD_REQUEST_NO_URI         = -201, /**< @brief Bad request: no URI */
+    HTTP_ERR_BAD_RESPONSE_NO_PROTOCOL   = -210, /**< @brief Bad response: no protocol */
+    HTTP_ERR_BAD_RESPONSE_NO_STATUS     = -211  /**< @brief Bad response: no status */
 };
 
 
 /**
  * @brief Connection flags.
+ *
+ * This constants are related to various connection aspects:
+ *
+ * - HTTP_CONN_DO_NOT_CACHE flag is used to prevent connection caching.
+ *   It is equivalent to "Connection: close" header.
+ * - HTTP_CONN_NO_THREAD means to run request on the same thread.
+ * - HTTP_CONN_CHECK_DOMAIN_NAME flag enables domain name check during SSL handshake.
+ * - HTTP_CONN_USE_SNI flag enables SNI TLS extension.
+ *
+ * @see http_client_do()
  */
 enum HTTP_ConnFlags
 {
-    HTTP_CONN_DO_NOT_CACHE      = 0x0001, /**< @brief Do not cache connection after use. */
-    HTTP_CONN_NO_THREAD         = 0x0002, /**< @brief Do not run additional thread. */
-    HTTP_CONN_CHECK_DOMAIN_NAME = 0x0010, /**< @brief Check domain name during SSL handshake. */
-    HTTP_CONN_USE_SNI           = 0x0020, /**< @brief Use Server Name Indication TLS extension. */
+    HTTP_CONN_DO_NOT_CACHE      = 0x0001, /**< @brief Do not cache connection after use */
+    HTTP_CONN_NO_THREAD         = 0x0002, /**< @brief Do not run additional thread */
+    HTTP_CONN_CHECK_DOMAIN_NAME = 0x0010, /**< @brief Check domain name during SSL handshake */
+    HTTP_CONN_USE_SNI           = 0x0020  /**< @brief Use Server Name Indication TLS extension */
 };
 
 
 /**
  * @brief Possible values of "Connection" header.
+ *
+ * @see http_header_connection_parse()
+ * @see http_header_connection_string()
  */
 enum HTTP_HeaderConnection
 {
     HTTP_CONNECTION_MISSING,    /**< @brief Header is missing. */
     HTTP_CONNECTION_UNKNOWN,    /**< @brief Unknown value. */
     HTTP_CONNECTION_KEEP_ALIVE, /**< @brief Connection should be kept alive. */
-    HTTP_CONNECTION_CLOSE,      /**< @brief Connection should be closed. */
+    HTTP_CONNECTION_CLOSE       /**< @brief Connection should be closed. */
 };
 
 
@@ -280,7 +320,7 @@ enum HTTP_HeaderConnection
  * @brief Parse the "Connection" header.
  * @param value Connection value as string.
  * @return Parsed Connection value.
- * @see enum HTTP_HeaderConnection
+ * @see HTTP_HeaderConnection
  */
 enum HTTP_HeaderConnection http_header_connection_parse(const char *value);
 
@@ -290,12 +330,204 @@ enum HTTP_HeaderConnection http_header_connection_parse(const char *value);
  * @param connection Connection value.
  * @return Connection value as string.
  *         "unknown" for unknown values.
+ * @see HTTP_HeaderConnection
  */
 const char* http_header_connection_string(enum HTTP_HeaderConnection connection);
 
 
+/**
+ * @brief Possible values of "Transfer-Encoding" header.
+ *
+ * @see http_header_transfer_encoding_parse()
+ * @see http_header_transfer_encoding_string()
+ */
+enum HTTP_HeaderTransferEncoding
+{
+    HTTP_TRANSFER_ENCODING_MISSING, /**< @brief Header is missing. */
+    HTTP_TRANSFER_ENCODING_UNKNOWN, /**< @brief Unknown value. */
+    HTTP_TRANSFER_ENCODING_CHUNKED  /**< @brief Chunked transfer encoding. */
+};
+
+
+/**
+ * @brief Parse the "Transfer-Encoding" header.
+ * @param value Transfer-Encoding value as string.
+ * @return Parsed Transfer-Encoding value.
+ * @see HTTP_HeaderTransferEncoding
+ */
+enum HTTP_HeaderTransferEncoding http_header_transfer_encoding_parse(const char *value);
+
+
+/**
+ * @brief Get "Transfer-Encoding" header as a string.
+ * @param transfer_encoding Transfer-Encoding value.
+ * @return Transfer-Encoding value as string.
+ *         "unknown" for unknown values.
+ * @see HTTP_HeaderTransferEncoding
+ */
+const char* http_header_transfer_encoding_string(enum HTTP_HeaderTransferEncoding transfer_encoding);
+
+
 // HTTP connection
 #if defined(HTTP_CLIENT) || defined(HTTP_SERVER)
+
+/**
+ * @brief HTTP request related data.
+ *
+ * Contains request line related data: HTTP method, HTTP protocol and URI.
+ * Also contains target host and a set of known headers:
+ * - "Content-Length" as `headers.content_length`
+ * - "Connection" as `headers.connection`
+ * - "Transfer-Encoding" as `headers.transfer_encoding`
+ *
+ * If URI is short enough to fit the `uri_fix` array
+ * then no dynamic memory is used. Otherwise the dynamic
+ * buffer `uri_dyn` is allocated to store long string.
+ *
+ * The same approach is used for `host_dyn` and `host_fix`.
+ *
+ * @see http_conn_get_request_uri()
+ * @see http_conn_set_request_uri()
+ * @see http_conn_get_request_host()
+ * @see http_conn_set_request_host()
+ * @relates HTTP_Conn
+ */
+struct HTTP_Request
+{
+    /**
+     * @brief HTTP method.
+     *
+     * Zero if unknown.
+     */
+    enum HTTP_Method method;
+
+    /**
+     * @brief Protocol version.
+     *
+     * Zero if unknown.
+     */
+    enum HTTP_Proto protocol;
+
+    /**
+     * @brief Resource identifier.
+     *
+     * Dynamically allocated.
+     */
+    char *uri_dyn;
+
+    /**
+     * @brief Resource identifier (static).
+     */
+    char uri_fix[96];
+
+    /**
+     * @brief Target host.
+     *
+     * Dynamically allocated.
+     */
+    char *host_dyn;
+
+    /**
+     * @brief Target host (static).
+     */
+    char host_fix[32];
+
+    // set of known headers
+    struct
+    {
+        /**
+         * @brief The "Content-Length" header.
+         *
+         * `-1` if corresponding header is missing.
+         */
+        int64_t content_length;
+
+        /**
+         * @brief The "Connection" header.
+         */
+        enum HTTP_HeaderConnection connection;
+
+        /**
+         * @brief The "Transfer-Encoding" header.
+         */
+        enum HTTP_HeaderTransferEncoding transfer_encoding;
+    } headers;
+    /**<
+     * @brief Set of known request headers.
+     */
+};
+
+
+/**
+ * @brief HTTP response related data.
+ *
+ * Contains response status line related data: HTTP protocol, status code and
+ * reason phrase. Also contains a set of known headers:
+ * - "Content-Length" as `headers.content_length`
+ * - "Connection" as `headers.connection`
+ * - "Transfer-Encoding" as `headers.transfer_encoding`
+ *
+ * If reason phrase is short enough to fit the `reason_fix` array
+ * then no dynamic memory is used. Otherwise the dynamic
+ * buffer `reason_dyn` is allocated to store long string.
+ *
+ * @see http_conn_get_response_reason()
+ * @see http_conn_set_response_reason()
+ * @relates HTTP_Conn
+ */
+struct HTTP_Response
+{
+    /**
+     * @brief Protocol version.
+     *
+     * Zero if unknown.
+     */
+    enum HTTP_Proto protocol;
+
+    /**
+     * @brief HTTP status code.
+     *
+     * Zero if unknown.
+     */
+    int status;
+
+    /**
+     * @brief Status reason phrase.
+     *
+     * Dynamically allocated.
+     */
+    char *reason_dyn;
+
+    /**
+     * @brief Status reason phrase (static).
+     */
+    char reason_fix[32];
+
+    // set of known headers
+    struct
+    {
+        /**
+         * @brief The "Content-Length" header.
+         *
+         * `-1` if corresponding header is missing.
+         */
+        int64_t content_length;
+
+        /**
+         * @brief The "Connection" header.
+         */
+        enum HTTP_HeaderConnection connection;
+
+        /**
+         * @brief The "Transfer-Encoding" header.
+         */
+        enum HTTP_HeaderTransferEncoding transfer_encoding;
+    } headers;
+    /**<
+     * @brief Set of known response headers.
+     */
+};
+
 
 /**
  * @brief HTTP connection.
@@ -331,131 +563,14 @@ struct HTTP_Conn
 
 
     /**
-     * @brief HTTP request related data.
-     *
-     * If URI is short enough to fit the `uri_fixed` array
-     * then no dynamic memory is used. Otherwise the dynamic
-     * buffer `uri` is allocated to store long string.
-     *
-     * The same approach is used for `host` and `host_fixed`.
-     *
-     * @see http_conn_get_request_uri()
-     * @see http_conn_get_request_host()
+     * @brief Request related data.
      */
-    struct HTTP_ConnRequest
-    {
-        /**
-         * @brief HTTP method.
-         *
-         * Zero if unknown.
-         */
-        enum HTTP_Method method;
-
-        /**
-         * @brief Protocol version.
-         *
-         * Zero if unknown.
-         */
-        enum HTTP_Proto protocol;
-
-        /**
-         * @brief Resource identifier.
-         *
-         * Dynamically allocated.
-         */
-        char *uri;
-
-        /**
-         * @brief Resource identifier (static).
-         */
-        char uri_fixed[96];
-
-        /**
-         * @brief Target host.
-         *
-         * Dynamically allocated.
-         */
-        char *host;
-
-        /**
-         * @brief Target host (static).
-         */
-        char host_fixed[32];
-
-        // set of known headers
-        struct
-        {
-            /**
-             * @brief The "Content-Length" header.
-             *
-             * `-1` if corresponding header is missing.
-             */
-            int64_t content_length;
-
-            /**
-             * @brief The "Connection" header.
-             */
-            enum HTTP_HeaderConnection connection;
-
-        } headers; /**< @brief Set of known request headers. */
-    } request; /**< @brief Request related data. */
-
+    struct HTTP_Request request;
 
     /**
-     * @brief HTTP response related data.
-     *
-     * If reason phrase is short enough to fit the `reason_fixed` array
-     * then no dynamic memory is used. Otherwise the dynamic
-     * buffer `reason` is allocated to store long string.
-     *
-     * @see http_conn_get_response_reason()
+     * @brief Response related data.
      */
-    struct HTTP_ConnResponse
-    {
-        /**
-         * @brief Protocol version.
-         *
-         * Zero if unknown.
-         */
-        enum HTTP_Proto protocol;
-
-        /**
-         * @brief HTTP status code.
-         *
-         * Zero if unknown.
-         */
-        int status;
-
-        /**
-         * @brief Status reason phrase.
-         *
-         * Dynamically allocated.
-         */
-        char *reason;
-
-        /**
-         * @brief Status reason phrase (static).
-         */
-        char reason_fixed[32];
-
-        // set of known headers
-        struct
-        {
-            /**
-             * @brief The "Content-Length" header.
-             *
-             * `-1` if corresponding header is missing.
-             */
-            int64_t content_length;
-
-            /**
-             * @brief The "Connection" header.
-             */
-            enum HTTP_HeaderConnection connection;
-
-            // TODO: Transfer-Encoding
-        } headers; /**< @brief Set of known response headers. */
-    } response; /**< @brief Response related data. */
+    struct HTTP_Response response;
 
 
     /**
@@ -513,6 +628,7 @@ struct HTTP_Conn
  * @return Zero on success.
  *
  * @see http_conn_free()
+ * @relates HTTP_Conn
  */
 int http_conn_new(WOLFSSL_CTX *ctx, int fd,
                   struct HTTP_Conn **conn);
@@ -523,6 +639,7 @@ int http_conn_new(WOLFSSL_CTX *ctx, int fd,
  * @param[in] conn Connection to release.
  *
  * @see http_conn_new()
+ * @relates HTTP_Conn
  */
 void http_conn_free(struct HTTP_Conn *conn);
 
@@ -531,6 +648,9 @@ void http_conn_free(struct HTTP_Conn *conn);
  * @brief Get HTTP request method as string.
  * @param[in] conn Connection to get method of.
  * @return Request method string.
+ *
+ * @see http_conn_set_request_method()
+ * @relates HTTP_Conn
  */
 static inline const char* http_conn_get_request_method(const struct HTTP_Conn *conn)
 {
@@ -543,6 +663,9 @@ static inline const char* http_conn_get_request_method(const struct HTTP_Conn *c
  * @param[in] conn Connection to set method for.
  * @param[in] method HTTP request method.
  * @return Zero on success.
+ *
+ * @see http_conn_get_request_method()
+ * @relates HTTP_Conn
  */
 int http_conn_set_request_method(struct HTTP_Conn *conn, enum HTTP_Method method);
 
@@ -551,6 +674,9 @@ int http_conn_set_request_method(struct HTTP_Conn *conn, enum HTTP_Method method
  * @brief Get HTTP request protocol as string.
  * @param[in] conn Connection to get protocol of.
  * @return Request protocol string.
+ *
+ * @see http_conn_set_request_proto()
+ * @relates HTTP_Conn
  */
 static inline const char* http_conn_get_request_proto(const struct HTTP_Conn *conn)
 {
@@ -563,6 +689,9 @@ static inline const char* http_conn_get_request_proto(const struct HTTP_Conn *co
  * @param[in] conn Connection to set protocol for.
  * @param[in] proto HTTP protocol.
  * @return Zero on success.
+ *
+ * @see http_conn_get_request_proto()
+ * @relates HTTP_Conn
  */
 int http_conn_set_request_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto);
 
@@ -574,11 +703,12 @@ int http_conn_set_request_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto);
  *
  * @see http_conn_set_request_uri()
  * @see http_conn_add_request_uri()
+ * @relates HTTP_Conn
  */
 static inline const char* http_conn_get_request_uri(const struct HTTP_Conn *conn)
 {
-    return conn->request.uri ? conn->request.uri        // dynamic
-                             : conn->request.uri_fixed; // static
+    return conn->request.uri_dyn ? conn->request.uri_dyn    // dynamic
+                                 : conn->request.uri_fix;   // fixed
 }
 
 
@@ -591,6 +721,8 @@ static inline const char* http_conn_get_request_uri(const struct HTTP_Conn *conn
  * @return Zero on success.
  *
  * @see http_conn_get_request_uri()
+ * @see http_conn_add_request_uri()
+ * @relates HTTP_Conn
  */
 int http_conn_set_request_uri(struct HTTP_Conn *conn,
                               const char *uri,
@@ -600,14 +732,18 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
 /**
  * @brief Add a part of HTTP request URI to the end.
  * @param[in] conn Connection to update URI of.
- * @param[in] uri_part Request URI part to add.
+ * @param[in] uri Request URI part to add.
+ * @param[in] uri_len Request URI length in bytes.
+ *                    `-1` if string is NULL-terminated.
  * @return Zero on success.
  *
  * @see http_conn_get_request_uri()
  * @see http_conn_set_request_uri()
+ * @relates HTTP_Conn
  */
 int http_conn_add_request_uri(struct HTTP_Conn *conn,
-                              const char *uri_part);
+                              const char *uri,
+                              int uri_len);
 
 
 /**
@@ -616,11 +752,12 @@ int http_conn_add_request_uri(struct HTTP_Conn *conn,
  * @return Target host.
  *
  * @see http_conn_set_request_host()
+ * @relates HTTP_Conn
  */
 static inline const char* http_conn_get_request_host(const struct HTTP_Conn *conn)
 {
-    return conn->request.host ? conn->request.host        // dynamic
-                              : conn->request.host_fixed; // static
+    return conn->request.host_dyn ? conn->request.host_dyn  // dynamic
+                                  : conn->request.host_fix; // fixed
 }
 
 
@@ -633,6 +770,7 @@ static inline const char* http_conn_get_request_host(const struct HTTP_Conn *con
  * @return Zero on success.
  *
  * @see http_conn_get_request_host()
+ * @relates HTTP_Conn
  */
 int http_conn_set_request_host(struct HTTP_Conn *conn,
                                const char *host,
@@ -640,9 +778,47 @@ int http_conn_set_request_host(struct HTTP_Conn *conn,
 
 
 /**
+ * @brief Check if HTTP request is chunked.
+ * @param[in] conn Connection to check.
+ * @return Non-zero if request is chunked.
+ *
+ * @relates HTTP_Conn
+ */
+static inline int http_conn_is_request_chunked(const struct HTTP_Conn *conn)
+{
+    return (HTTP_TRANSFER_ENCODING_CHUNKED == conn->request.headers.transfer_encoding);
+}
+
+
+/**
+ * @brief Get remaining length of HTTP request content.
+ *
+ * Note, this value contains number of remaining bytes in the request's
+ * content. If the "Transfer-Encoding: chunked" mode is used then
+ * this value contains remaining length of the current data chunk.
+ *
+ * @param conn Connection to check.
+ * @return Number of bytes can be received on next iteration.
+ */
+static inline int http_conn_request_content_can_recv(const struct HTTP_Conn *conn)
+{
+    if (conn->request.headers.content_length >= 0)
+    {
+        const int64_t rem = (conn->request.headers.content_length - conn->internal.content_pos);
+        return rem >= 0 ? (int)rem : 0; // TODO: check overflow
+    }
+
+    return 0; // we don't know how much can be received
+}
+
+
+/**
  * @brief Get HTTP response protocol as string.
  * @param conn Connection to get protocol of.
  * @return Response protocol string.
+ *
+ * @see http_conn_set_response_proto()
+ * @relates HTTP_Conn
  */
 static inline const char* http_conn_get_response_proto(const struct HTTP_Conn *conn)
 {
@@ -655,6 +831,9 @@ static inline const char* http_conn_get_response_proto(const struct HTTP_Conn *c
  * @param[in] conn Connection to set protocol for.
  * @param[in] proto HTTP protocol.
  * @return Zero on success.
+ *
+ * @see http_conn_get_response_proto()
+ * @relates HTTP_Conn
  */
 int http_conn_set_response_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto);
 
@@ -664,6 +843,9 @@ int http_conn_set_response_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto);
  * @brief Get HTTP response status code.
  * @param[in] conn Connection to get status code of.
  * @return Response status code.
+ *
+ * @see http_conn_set_response_status()
+ * @relates HTTP_Conn
  */
 static inline int http_conn_get_response_status(const struct HTTP_Conn *conn)
 {
@@ -676,6 +858,9 @@ static inline int http_conn_get_response_status(const struct HTTP_Conn *conn)
  * @param[in] conn Connection to set status code for.
  * @param[in] status HTTP status code.
  * @return Zero on success.
+ *
+ * @see http_conn_get_response_status()
+ * @relates HTTP_Conn
  */
 int http_conn_set_response_status(struct HTTP_Conn *conn, int status);
 
@@ -686,11 +871,12 @@ int http_conn_set_response_status(struct HTTP_Conn *conn, int status);
  * @return Reason phrase.
  *
  * @see http_conn_set_response_reason()
+ * @relates HTTP_Conn
  */
 static inline const char* http_conn_get_response_reason(const struct HTTP_Conn *conn)
 {
-    const char *reason = conn->response.reason ? conn->response.reason        // dynamic
-                                               : conn->response.reason_fixed; // static
+    const char *reason = conn->response.reason_dyn ? conn->response.reason_dyn  // dynamic
+                                                   : conn->response.reason_fix; // fixed
 
     if (!reason || !reason[0]) // empty?
     {
@@ -714,10 +900,46 @@ static inline const char* http_conn_get_response_reason(const struct HTTP_Conn *
  *
  * @see http_conn_get_response_status()
  * @see http_conn_get_response_reason()
+ * @relates HTTP_Conn
  */
 int http_conn_set_response_reason(struct HTTP_Conn *conn,
                                   const char *reason,
                                   int reason_len);
+
+
+/**
+ * @brief Check if HTTP response is chunked.
+ * @param[in] conn Connection to check.
+ * @return Non-zero if response is chunked.
+ *
+ * @relates HTTP_Conn
+ */
+static inline int http_conn_is_response_chunked(const struct HTTP_Conn *conn)
+{
+    return (HTTP_TRANSFER_ENCODING_CHUNKED == conn->response.headers.transfer_encoding);
+}
+
+
+/**
+ * @brief Get remaining length of HTTP response content.
+ *
+ * Note, this value contains number of remaining bytes in the response's
+ * content. If the "Transfer-Encoding: chunked" mode is used then
+ * this value contains remaining length of the current data chunk.
+ *
+ * @param conn Connection to check.
+ * @return Number of bytes can be received on next iteration.
+ */
+static inline int http_conn_response_content_can_recv(const struct HTTP_Conn *conn)
+{
+    if (conn->response.headers.content_length >= 0)
+    {
+        const int64_t rem = (conn->response.headers.content_length - conn->internal.content_pos);
+        return rem >= 0 ? (int)rem : 0; // TODO: check overflow
+    }
+
+    return 0; // we don't know how much can be received
+}
 
 
 // HTTP connection - client related
@@ -741,6 +963,7 @@ int http_conn_set_response_reason(struct HTTP_Conn *conn,
  * @see http_conn_send_request_header()
  * @see http_conn_send_request_body()
  * @see http_conn_flush_request()
+ * @relates HTTP_Conn
  */
 int http_conn_send_request_line(struct HTTP_Conn *conn);
 
@@ -762,6 +985,7 @@ int http_conn_send_request_line(struct HTTP_Conn *conn);
  * @see http_conn_send_request_line()
  * @see http_conn_send_request_body()
  * @see http_conn_flush_request()
+ * @relates HTTP_Conn
  */
 int http_conn_send_request_header(struct HTTP_Conn *conn,
                                   const char *name,
@@ -785,6 +1009,7 @@ int http_conn_send_request_header(struct HTTP_Conn *conn,
  * @see http_conn_send_request_line()
  * @see http_conn_send_request_header()
  * @see http_conn_flush_request()
+ * @relates HTTP_Conn
  */
 int http_conn_send_request_body(struct HTTP_Conn *conn,
                                 const void *buf, int len);
@@ -801,6 +1026,7 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
  * @see http_conn_send_request_line()
  * @see http_conn_send_request_header()
  * @see http_conn_send_request_body()
+ * @relates HTTP_Conn
  */
 int http_conn_flush_request(struct HTTP_Conn *conn);
 
@@ -824,6 +1050,7 @@ int http_conn_flush_request(struct HTTP_Conn *conn);
  * @see http_conn_recv_response_body()
  * @see http_conn_ignore_response_headers()
  * @see http_conn_ignore_response_body()
+ * @relates HTTP_Conn
  */
 int http_conn_recv_response_status(struct HTTP_Conn *conn);
 
@@ -847,6 +1074,7 @@ int http_conn_recv_response_status(struct HTTP_Conn *conn);
  * @see http_conn_recv_response_body()
  * @see http_conn_ignore_response_headers()
  * @see http_conn_ignore_response_body()
+ * @relates HTTP_Conn
  */
 int http_conn_recv_response_header(struct HTTP_Conn *conn,
                                    const char **name,
@@ -857,6 +1085,12 @@ int http_conn_recv_response_header(struct HTTP_Conn *conn,
  * @brief Ignore rest of HTTP headers.
  * @param[in] conn Connection to receive HTTP headers from.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_response_status()
+ * @see http_conn_recv_response_header()
+ * @see http_conn_recv_response_body()
+ * @see http_conn_ignore_response_body()
+ * @relates HTTP_Conn
  */
 int http_conn_ignore_response_headers(struct HTTP_Conn *conn);
 
@@ -873,6 +1107,7 @@ int http_conn_ignore_response_headers(struct HTTP_Conn *conn);
  * @see http_conn_recv_response_header()
  * @see http_conn_ignore_response_headers()
  * @see http_conn_ignore_response_body()
+ * @relates HTTP_Conn
  */
 int http_conn_recv_response_body(struct HTTP_Conn *conn,
                                  void *buf, int *len);
@@ -886,6 +1121,12 @@ int http_conn_recv_response_body(struct HTTP_Conn *conn,
  *
  * @param[in] conn Connection to receive data from.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_response_status()
+ * @see http_conn_recv_response_header()
+ * @see http_conn_ignore_response_headers()
+ * @see http_conn_recv_response_body()
+ * @relates HTTP_Conn
  */
 int http_conn_ignore_response_body(struct HTTP_Conn *conn);
 
@@ -909,6 +1150,12 @@ int http_conn_ignore_response_body(struct HTTP_Conn *conn);
  *
  * @param[in] conn Connection to receive HTTP request from.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_request_header()
+ * @see http_conn_ignore_request_headers()
+ * @see http_conn_recv_request_body()
+ * @see http_conn_ignore_request_body()
+ * @relates HTTP_Conn
  */
 int http_conn_recv_request_line(struct HTTP_Conn *conn);
 
@@ -927,6 +1174,12 @@ int http_conn_recv_request_line(struct HTTP_Conn *conn);
  * @param[out] name Header name.
  * @param[out] value Header value.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_request_line()
+ * @see http_conn_ignore_request_headers()
+ * @see http_conn_recv_request_body()
+ * @see http_conn_ignore_request_body()
+ * @relates HTTP_Conn
  */
 int http_conn_recv_request_header(struct HTTP_Conn *conn,
                                   const char **name,
@@ -937,6 +1190,12 @@ int http_conn_recv_request_header(struct HTTP_Conn *conn,
  * @brief Ignore rest of HTTP headers.
  * @param[in] conn Connection to receive HTTP headers from.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_request_line()
+ * @see http_conn_recv_request_header()
+ * @see http_conn_recv_request_body()
+ * @see http_conn_ignore_request_body()
+ * @relates HTTP_Conn
  */
 int http_conn_ignore_request_headers(struct HTTP_Conn *conn);
 
@@ -948,6 +1207,12 @@ int http_conn_ignore_request_headers(struct HTTP_Conn *conn);
  * @param[in,out] len Buffer length in bytes on input.
  *                    Actual number of bytes read on output.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_request_line()
+ * @see http_conn_recv_request_header()
+ * @see http_conn_ignore_request_headers()
+ * @see http_conn_ignore_request_body()
+ * @relates HTTP_Conn
  */
 int http_conn_recv_request_body(struct HTTP_Conn *conn,
                                 void *buf, int *len);
@@ -961,6 +1226,12 @@ int http_conn_recv_request_body(struct HTTP_Conn *conn,
  *
  * @param[in] conn Connection to receive data from.
  * @return Zero on success.
+ *
+ * @see http_conn_recv_request_line()
+ * @see http_conn_recv_request_header()
+ * @see http_conn_ignore_request_headers()
+ * @see http_conn_recv_request_body()
+ * @relates HTTP_Conn
  */
 int http_conn_ignore_request_body(struct HTTP_Conn *conn);
 
@@ -983,6 +1254,7 @@ int http_conn_ignore_request_body(struct HTTP_Conn *conn);
  * @see http_conn_send_response_header()
  * @see http_conn_send_response_body()
  * @see http_conn_flush_response()
+ * @relates HTTP_Conn
  */
 int http_conn_send_response_status(struct HTTP_Conn *conn);
 
@@ -1001,8 +1273,10 @@ int http_conn_send_response_status(struct HTTP_Conn *conn);
  * @param[in] value Header value.
  * @return Zero on success.
  *
+ * @see http_conn_send_response_status()
  * @see http_conn_send_response_body()
  * @see http_conn_flush_response()
+ * @relates HTTP_Conn
  */
 int http_conn_send_response_header(struct HTTP_Conn *conn,
                                    const char *name,
@@ -1023,8 +1297,10 @@ int http_conn_send_response_header(struct HTTP_Conn *conn,
  * @param[in] len Response body length in bytes.
  * @return Zero on success.
  *
+ * @see http_conn_send_response_status()
  * @see http_conn_send_response_header()
  * @see http_conn_flush_response()
+ * @relates HTTP_Conn
  */
 int http_conn_send_response_body(struct HTTP_Conn *conn,
                                  const void *buf, int len);
@@ -1038,8 +1314,10 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
  * @param[in] conn Connection to finish response.
  * @return Zero on success.
  *
+ * @see http_conn_send_response_status()
  * @see http_conn_send_response_header()
  * @see http_conn_send_response_body()
+ * @relates HTTP_Conn
  */
 int http_conn_flush_response(struct HTTP_Conn *conn);
 
@@ -1063,38 +1341,41 @@ struct HTTP_Client
      */
     WOLFSSL_CTX *ctx;
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
 
     /**
-     * @brief Contains resolve cache data.
-     *
-     * SHA-1 digest is used to identify target host.
-     * It has fixed size for all hosts.
+     * @brief Connection cache entry.
+     * @see connecion_cache
      */
-    struct HTTP_ClientConnCacheItem
+    struct HTTP_ClientConnCacheEntry
     {
         /**
          * @brief Cached connection.
          */
         struct HTTP_Conn *conn;
 
-        // TODO: lifetime?
-    } conn_cache[HTTP_CLIENT_CONN_CACHE_SIZE]; /**< @brief Cache of connections. */
+        // TODO: lifetime? check alive?
+    } conn_cache[HTTP_CLIENT_CONN_CACHE_SIZE]; /**< @brief Connection cache. */
 
     // TODO: connection cache mutex
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
-// SHA-1 digest is used as host digest
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
+/**
+ * @brief SHA-1 is used as host digest.
+ * @see resolve_cache
+ */
 # define HTTP_HOST_DIGEST_SIZE (20)
 
     /**
-     * @brief Contains resolve cache data.
+     * @brief Resolve cache entry.
      *
      * SHA-1 digest is used to identify target host.
      * It has fixed size for all hosts.
+     *
+     * @see resolve_cache
      */
-    struct HTTP_ResolveCacheItem
+    struct HTTP_ResolveCacheEntry
     {
         /**
          * @brief SHA-1 digest of target host.
@@ -1152,17 +1433,20 @@ struct HTTP_Client
  * ```
  *
  * @see http_client_do()
+ * @relates HTTP_Client
  */
 typedef int (*HTTP_ClientCallback)(int err, struct HTTP_Conn *conn, void *user_data);
 
 
 /**
  * @brief Create new HTTP client.
+ *
  * @param[in] proto Decided SSL protocol version.
  * @param[out] client New HTTP client.
  * @return Zero on success.
  *
  * @see http_client_free()
+ * @relates HTTP_Client
  */
 int http_client_new(enum SSL_Proto proto,
                     struct HTTP_Client **client);
@@ -1170,8 +1454,11 @@ int http_client_new(enum SSL_Proto proto,
 
 /**
  * @brief Release existing HTTP client.
+ *
  * @param[in] client HTTP client to release.
+ *
  * @see http_client_new()
+ * @relates HTTP_Client
  */
 void http_client_free(struct HTTP_Client *client);
 
@@ -1185,6 +1472,9 @@ void http_client_free(struct HTTP_Client *client);
  * @param[in] client HTTP client.
  * @param[in] cert_file Certificate filepath to load from.
  * @return Zero on success.
+ *
+ * @see http_client_load_verify_cert_asn1()
+ * @relates HTTP_Client
  */
 int http_client_load_verify_cert_file(struct HTTP_Client *client,
                                       const char *cert_file);
@@ -1203,6 +1493,9 @@ int http_client_load_verify_cert_file(struct HTTP_Client *client,
  * @param[in] cert Input buffer containing the certificate to be loaded.
  * @param[in] cert_len Size of the certificate input buffer.
  * @return Zero on success.
+ *
+ * @see http_client_load_verify_cert_file()
+ * @relates HTTP_Client
  */
 int http_client_load_verify_cert_asn1(struct HTTP_Client *client,
                                       const void *cert, int cert_len);
@@ -1221,6 +1514,8 @@ int http_client_load_verify_cert_asn1(struct HTTP_Client *client,
  * @param[in] client HTTP client.
  * @param[in] cipher_list Colon-delimited list of ciphers to use.
  * @return Zero on success.
+ *
+ * @relates HTTP_Client
  */
 int http_client_set_cipher_list(struct HTTP_Client *client,
                                 const char *cipher_list);
@@ -1238,8 +1533,10 @@ int http_client_set_cipher_list(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- *                  See HTTP_ConnFlags.
- * @return Non-zero on success.
+ * @return Zero on success.
+ *
+ * @see HTTP_ConnFlags
+ * @relates HTTP_Client
  */
 int http_client_do(struct HTTP_Client *client,
                    enum HTTP_Method method,
@@ -1256,8 +1553,11 @@ int http_client_do(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- *                  See HTTP_ConnFlags.
- * @return Non-zero on success.
+ * @return Zero on success.
+ *
+ * @see http_client_do()
+ * @see HTTP_ConnFlags
+ * @relates HTTP_Client
  */
 static inline int http_client_get(struct HTTP_Client *client,
                                   const char *url,
@@ -1277,8 +1577,11 @@ static inline int http_client_get(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- *                  See HTTP_ConnFlags.
- * @return Non-zero on success.
+ * @return Zero on success.
+ *
+ * @see http_client_do()
+ * @see HTTP_ConnFlags
+ * @relates HTTP_Client
  */
 static inline int http_client_put(struct HTTP_Client *client,
                                   const char *url,
@@ -1298,8 +1601,11 @@ static inline int http_client_put(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- *                  See HTTP_ConnFlags.
- * @return Non-zero on success.
+ * @return Zero on success.
+ *
+ * @see http_client_do()
+ * @see HTTP_ConnFlags
+ * @relates HTTP_Client
  */
 static inline int http_client_post(struct HTTP_Client *client,
                                    const char *url,
@@ -1319,8 +1625,11 @@ static inline int http_client_post(struct HTTP_Client *client,
  * @param[in] callback Callback function to handle this request.
  * @param[in] user_data Custom user data.
  * @param[in] flags Combination of connection-related flags.
- *                  See HTTP_ConnFlags.
- * @return Non-zero on success.
+ * @return Zero on success.
+ *
+ * @see http_client_do()
+ * @see HTTP_ConnFlags
+ * @relates HTTP_Client
  */
 static inline int http_client_delete(struct HTTP_Client *client,
                                      const char *url,
@@ -1464,6 +1773,7 @@ struct HTTP_Server
  * @return Zero on success.
  *
  * @see http_server_free()
+ * @relates HTTP_Server
  */
 int http_server_new(enum SSL_Proto proto,
                     struct HTTP_Server **server);
@@ -1472,7 +1782,9 @@ int http_server_new(enum SSL_Proto proto,
 /**
  * @brief Release existing HTTP server.
  * @param[in] server HTTP server to release.
+ *
  * @see http_server_new()
+ * @relates HTTP_Server
  */
 void http_server_free(struct HTTP_Server *server);
 
@@ -1482,6 +1794,8 @@ void http_server_free(struct HTTP_Server *server);
  * @param[in] server HTTP server.
  * @param[in] endpoints Array of custom REST endpoints.
  * @param[in] num_of_endpoints Number of endpoints.
+ *
+ * @relates HTTP_Server
  */
 void http_server_set_endpoints(struct HTTP_Server *server,
                                const struct HTTP_Endpoint *endpoints,
@@ -1498,6 +1812,8 @@ void http_server_set_endpoints(struct HTTP_Server *server,
  * @param[in] cert_file Certificate filepath to load from.
  * @param[in] key_file Private key filepath to load from.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_use_cert_file(struct HTTP_Server *server,
                               const char *cert_file,
@@ -1515,6 +1831,8 @@ int http_server_use_cert_file(struct HTTP_Server *server,
  * @param[in] key Input buffer containing the private key to be loaded.
  * @param[in] key_len Size of the private key input buffer.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_use_cert_asn1(struct HTTP_Server *server,
                               const void *cert, int cert_len,
@@ -1534,6 +1852,8 @@ int http_server_use_cert_asn1(struct HTTP_Server *server,
  * @param[in] server HTTP server.
  * @param[in] cipher_list Colon-delimited list of ciphers to use.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_set_cipher_list(struct HTTP_Server *server,
                                 const char *cipher_list);
@@ -1549,6 +1869,8 @@ int http_server_set_cipher_list(struct HTTP_Server *server,
  * @param[in] backlog Maximum length to which the queue
  *                    of pending connections may grow.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_start_secure(struct HTTP_Server *server,
                              int port, int backlog);
@@ -1564,6 +1886,8 @@ int http_server_start_secure(struct HTTP_Server *server,
  * @param[in] backlog Maximum length to which the queue
  *                    of pending connections may grow.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_start(struct HTTP_Server *server,
                       int port, int backlog);
@@ -1576,6 +1900,8 @@ int http_server_start(struct HTTP_Server *server,
  *
  * @param server HTTP server.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_main_loop(struct HTTP_Server *server);
 
@@ -1587,6 +1913,8 @@ int http_server_main_loop(struct HTTP_Server *server);
  *
  * @param server HTTP server to stop.
  * @return Zero on success.
+ *
+ * @relates HTTP_Server
  */
 int http_server_stop(struct HTTP_Server *server);
 
@@ -1602,7 +1930,7 @@ int http_server_stop(struct HTTP_Server *server);
  * @param[out] proto_len Protocol length.
  * @param[out] host Target host position.
  *                  Note, this string is not NULL-terminated!
- * @param[out] host_len Target host length.
+  * @param[out] host_len Target host length.
  * @param[out] port Port number.
  *                  If no port number is present it is detected based on protocol.
  *                  If protocol is unknown then `port` is not changed.
@@ -1628,6 +1956,8 @@ int http_parse_url(const char *url,
  *                  Note, this string is not NULL-terminated!
  * @param value_len Parameter value length in bytes.
  * @return Zero on success.
+ *
+ * @see http_get_query_param()
  */
 int http_parse_query(const char **query,
                      const char **name, int *name_len,
@@ -1645,6 +1975,8 @@ int http_parse_query(const char **query,
  * @param[out] value Parameter value.
  * @param[out] value_len Parameter value length in bytes.
  * @return Zero on success.
+ *
+ * @see http_parse_query()
  */
 int http_get_query_param(const char *query,
                          const char *name,
@@ -1678,3 +2010,187 @@ const void* http_find_crlf(const void *buf, int len);
 #endif // __cplusplus
 
 #endif // __HTTP_H__
+
+
+/**
+ * @page http_page HTTP common
+ *
+ * There are a few data structures and functions related to
+ * both @ref client_page and @ref server_page.
+ *
+ * - #SSL_Proto enum is used to define all possible SSL protocols.
+ * - #HTTP_Method enum is used to define all possible HTTP methods.
+ * - #HTTP_Proto enum is used to define all supported HTTP protocols.
+ * - #HTTP_Status enum is used to define some popular HTTP status codes.
+ * - #HTTP_Error enum contains all possible error codes.
+ * - #HTTP_ConnFlags enum contains bit field options related to connection.
+ *
+ * The following enums are used as various headers:
+ * - #HTTP_HeaderConnection enum for "Connection" header
+ * - #HTTP_HeaderTransferEncoding enum for "Transfer-Encoding" header
+ */
+
+
+/**
+ * @page client_page HTTP client
+ *
+ * HTTP_Client sends HTTP requests and parses HTTP responses.
+ * @tableofcontents
+ *
+ * @section client_init Client initialization
+ *
+ * First of all an instance of HTTP_Client should be created with http_client_new().
+ * At the end HTTP_Client instance should be released with http_client_free().
+ *
+ * ```
+ * #include "http.h"
+ * #define LOG_MODULE "main"
+ * #include "misc.h"
+ * int main(void)
+ * {
+ *     struct HTTP_Client *client = 0;
+ *     int res = 0; // OK by default
+ *
+ *     // initialize WolfSSL library
+ *     const int err = wolfSSL_Init();
+ *     if (WOLFSSL_SUCCESS != err)
+ *     {
+ *         ERROR("failed to initialize WolfSSL library\n");
+ *         goto failed; // failed
+ *     }
+ *     wolfSSL_Debugging_OFF();
+ *     INFO("wolfSSL version: %s\n",
+ *          wolfSSL_lib_version());
+ *
+ *     // create HTTP client
+ *     if (!!http_client_new(SSL_PROTO_TLSv1_2, &client))
+ *     {
+ *         ERROR("failed to create HTTP client\n");
+ *         goto failed; // failed
+ *     }
+ *
+ *     // TODO: initialize client SSL context, set cipher list
+ *     // TODO: send requests
+ *
+ *     if (0)
+ *     {
+ *         // tricky way to set exit code to -1
+ *         // in normal scenario this code is always ignored
+ * failed:
+ *         res = -1;
+ *     }
+ *
+ *     DEBUG("cleaning up...\n");
+ *     http_client_free(client);
+ *     wolfSSL_Cleanup();
+ *
+ *     INFO("completed (exit code: %d)\n", res);
+ *     return res;
+ * }
+ * ```
+ *
+ * @section client_callback Sending requests
+ *
+ * To send a HTTP request corresponding callback function should be provided.
+ * This #HTTP_ClientCallback client callback function is used to prepare
+ * and send HTTP request and to receive and parse HTTP response.
+ *
+ * On calling http_client_do() the HTTP client establishes new connection
+ * or gets existing unused one and then calls provided client callback function.
+ * Note, client callback is called even if there is a connection error occurred.
+ *
+ * It is user responsibility to prepare HTTP request:
+ * - set HTTP protocol with http_conn_set_request_proto(), by default HTTP/1.1 is used.
+ * - modify HTTP request URI or query parameters with http_conn_set_request_uri()
+ *   or http_conn_add_request_uri()
+ * - provide any number of addition HTTP request headers with http_conn_send_request_header()
+ * - provide HTTP request body with http_conn_send_request_body()
+ * - and finally send the request with http_conn_flush_request()
+ *
+ * And to process HTTP response:
+ * - receive HTTP response status line with http_conn_recv_response_status()
+ *   and check the HTTP response status is OK
+ * - receive all HTTP response headers with http_conn_recv_response_header() or
+ *   just ignore all remaining headers with http_conn_ignore_response_headers().
+ * - receive whole HTTP response body with http_conn_recv_response_body() or
+ *   just ignore all remaining response data with http_conn_ignore_response_body().
+ *
+ * Almost all steps are optional and have appropriate default implementation.
+ * So if no "Host" request header is provided then automatic header will be
+ * sent just before request body.
+ *
+ * Note, the order of these steps is important! For example, it is illegal to
+ * call http_send_request_header() after http_send_request_body().
+ *
+ * Minimalistic callback can be the following:
+ *
+ * ```
+ * int my_callback(int err, struct HTTP_Conn *conn, void *user_data)
+ * {
+ *      if (HTTP_ERR_SUCCESS != err)
+ *          return err; // connection failed
+ *
+ *      // TODO: customize request
+ *
+ *      //
+ *      err = http_conn_recv_response_status(conn);
+ * }
+ * ```
+ *
+ * @section resolve_cache Resolve cache
+ *
+ * TBD
+ *
+ * @section connection_cache Connection cache
+ *
+ * TBD
+ *
+ * @section connection_wbuf Working buffer
+ */
+
+
+/**
+ * @page server_page HTTP server
+ *
+ * TBD
+ */
+
+
+
+/* Cheat-Sheet
+ *
+ * to test server:
+ * `curl --cacert server-cert.pem -H "Text: Hello" -s "https://www.wolfssl.com:8080/version"`
+ *
+ * to convert certificates from CRT (actually PEM) to binary DER format:
+ * `for name in *.crt; do openssl x509 -inform PEM -outform DER -in $name -out $name.der; done`
+ *
+ * to convert all certificates to C "include" file:
+ * `echo "# all certificates" > cert.c; for name in *.der; do xxd -i $name >> cert.c; done`
+ *
+ * # apply all certificates:
+ * echo "void load_all(WOLFSSL_CTX *ctx) {" >> cert.c;
+ * for name in `cat cert.h | sed -n "s|unsigned char \(.*\)\[\] = {|\1|p"`; do echo "  wolfSSL_CTX_load_verify_buffer(ctx, ${name}, ${name}_len, WOLFSSL_FILETYPE_ASN1);" >> cert.c; done
+ * echo "}" >> cert.c
+ */
+
+/* TODO
+ *
+ * - short tutorial with examples!
+ * + time performance metrics for client/server requests
+ * - client: dedicated thread per each request
+ * - client: limit the maximum number of connections
+ * - client: limit the total request execution time
+ * - client: support for chunked transfer
+ * - client: support basic authentication (strip username/password from URL)
+ * + server: support both http and https at the same time
+ * - server: dedicated thread per each request
+ * - server: dedicated thread for listen+accept
+ * - server: limit the maximum number of connections
+ * - server: limit the total request execution time
+ *
+ * wrappers for (corresponding flags to http_client_do()):
+ * - wolfSSL_CTX_UseSNI()
+ * - wolfSSL_UseSNI()
+ * - wolfSSL_check_domain_name()
+ */

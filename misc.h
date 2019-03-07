@@ -65,6 +65,7 @@ extern "C" {
  * #define LOG_ENABLED(level) (level <= LOG_LEVEL && level <= my_log_level)
  * #include "misc.h"
  * ```
+ *
  * Having this define it is possible to change log level at runtime by
  * setting the corresponding value to `my_log_level` variable.
  *

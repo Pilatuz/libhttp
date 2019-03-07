@@ -18,7 +18,7 @@
 
 #include <wolfssl/wolfcrypt/hash.h> // for SHA-1
 
-#ifndef __linux__ // TODO: MQX platform detection macro???
+#if defined(FREESCALE_MQX)  // MQX
 #include <mqx.h>
 #include <rtcs.h>
 #define hostent hostent_struct
@@ -34,6 +34,7 @@
 #define port_h2n(x) htons(x)
 #endif
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -43,11 +44,11 @@
  *
  * Should be used with "%d.%d.%d.%d" printf format.
  */
-#define PRINT_IPV4_ADDR(addr)           \
-    (addr.sin_addr.s_addr >> 0)&0x0ff,  \
-    (addr.sin_addr.s_addr >> 8)&0x0ff,  \
-    (addr.sin_addr.s_addr >> 16)&0x0ff, \
-    (addr.sin_addr.s_addr >> 24)&0x0ff
+#define PRINT_IPV4_ADDR(addr)             \
+    ((addr).sin_addr.s_addr >> 0)&0x0ff,  \
+    ((addr).sin_addr.s_addr >> 8)&0x0ff,  \
+    ((addr).sin_addr.s_addr >> 16)&0x0ff, \
+    ((addr).sin_addr.s_addr >> 24)&0x0ff
 // TODO: use IPBYTES from MQX
 
 
@@ -68,11 +69,17 @@ const char* ssl_proto_string(enum SSL_Proto proto)
 {
     switch (proto)
     {
+#ifdef WOLFSSL_ALLOW_SSLV3
     case SSL_PROTO_SSLv3:               return "SSLv3";
+#endif // WOLFSSL_ALLOW_SSLV3
+#ifdef WOLFSSL_ALLOW_TLSV10
     case SSL_PROTO_TLSv1_0:             return "TLSv1.0";
+#endif // WOLFSSL_ALLOW_TLSV10
     case SSL_PROTO_TLSv1_1:             return "TLSv1.1";
     case SSL_PROTO_TLSv1_2:             return "TLSv1.2";
+#ifdef WOLFSSL_TLS13
     case SSL_PROTO_TLSv1_3:             return "TLSv1.3";
+#endif // WOLFSSL_TLS13
     case SSL_PROTO_TLSv1_2_TO_SSLv3:    return "SSLv3-TLSv1.2";
     }
 
@@ -204,30 +211,69 @@ const char* http_header_connection_string(enum HTTP_HeaderConnection connection)
     return "unknown";
 }
 
+
+/*
+ * http_transfer_encoding_header_parse() implementation.
+ */
+enum HTTP_HeaderTransferEncoding http_header_transfer_encoding_parse(const char *value)
+{
+    if (0 == strcasecmp(value, "chunked"))
+        return HTTP_TRANSFER_ENCODING_CHUNKED;
+
+    return HTTP_TRANSFER_ENCODING_UNKNOWN;
+}
+
+
+/*
+ * http_transfer_encoding_header_string() implementation.
+ */
+const char* http_header_transfer_encoding_string(enum HTTP_HeaderTransferEncoding transfer_encoding)
+{
+    switch (transfer_encoding)
+    {
+    case HTTP_TRANSFER_ENCODING_CHUNKED:    return "chunked";
+
+    // all others...
+    case HTTP_TRANSFER_ENCODING_MISSING: break;
+    case HTTP_TRANSFER_ENCODING_UNKNOWN: break;
+    }
+
+    return "unknown";
+}
+
+
 // HTTP connection
 #if defined(HTTP_CLIENT) || defined(HTTP_SERVER)
 
 /**
  * @brief Connection internal flags.
+ *
+ * These flags are related to request/response sending/receiving.
  */
 enum HTTP_ConnInternalFlags
 {
     // client side
-    CONN_FLAG_REQUEST_LINE_SENT         = 0x00010000, /**< @brief Request line sent. Continue with sending request headers. */
-    CONN_FLAG_REQUEST_HEADERS_SENT      = 0x00020000, /**< @brief All request headers sent. Continue with request body. */
-    CONN_FLAG_REQUEST_BODY_SENT         = 0x00040000, /**< @brief Request body sent. Coninue with response receiving. */
-    CONN_FLAG_REQUEST_HOST_HEADER_SENT  = 0x00080000, /**< @brief "Host" request header sent. */
-    CONN_FLAG_RESPONSE_STATUS_RECEIVED  = 0x00100000, /**< @brief Response status line received. Continue with response headers. */
-    CONN_FLAG_RESPONSE_HEADERS_RECEIVED = 0x00200000, /**< @brief All response headers received. Continue with response body. */
+    CONN_FLAG_REQUEST_LINE_SENT                         = 0x00000100, /**< @brief Request line sent. Continue with sending request headers. */
+    CONN_FLAG_REQUEST_HOST_HEADER_SENT                  = 0x00000200, /**< @brief "Host" request header sent. */
+    CONN_FLAG_REQUEST_TRANSFER_ENCODING_HEADER_SENT     = 0x00000400, /**< @brief "Transfer-Encoding" request header sent. */
+    CONN_FLAG_REQUEST_CONTENT_LENGTH_HEADER_SENT        = 0x00000800, /**< @brief "Content-Length" request header sent. */
+    CONN_FLAG_REQUEST_HEADERS_SENT                      = 0x00001000, /**< @brief All request headers sent. Continue with request body. */
+    CONN_FLAG_REQUEST_BODY_SENT                         = 0x00002000, /**< @brief Request body sent. Coninue with response receiving. */
+    CONN_FLAG_RESPONSE_STATUS_RECEIVED                  = 0x00004000, /**< @brief Response status line received. Continue with response headers. */
+    CONN_FLAG_RESPONSE_HEADERS_RECEIVED                 = 0x00008000, /**< @brief All response headers received. Continue with response body. */
+    CONN_FLAG_RESPONSE_BODY_RECEIVED                    = 0x00010000, /**< @brief All response body received. Connection can be released. */
 
     // server side
-    CONN_FLAG_REQUEST_LINE_RECEIVED     = 0x01000000, /**< @brief Request line received. Continue receiving request headers. */
-    CONN_FLAG_REQUEST_HEADERS_RECEIVED  = 0x02000000, /**< @brief All request headers received. Continue with request body. */
-    CONN_FLAG_RESPONSE_STATUS_SENT      = 0x10000000, /**< @brief Response status line sent. */
-    CONN_FLAG_RESPONSE_HEADERS_SENT     = 0x20000000, /**< @brief All response headers sent. Continue with response body. */
-    CONN_FLAG_RESPONSE_BODY_SENT        = 0x40000000, /**< @brief Response body sent. Done. */
+    CONN_FLAG_REQUEST_LINE_RECEIVED                     = 0x00100000, /**< @brief Request line received. Continue receiving request headers. */
+    CONN_FLAG_REQUEST_HEADERS_RECEIVED                  = 0x00200000, /**< @brief All request headers received. Continue with request body. */
+    CONN_FLAG_REQUEST_BODY_RECEIVED                     = 0x00400000, /**< @brief All request body received. Continue with response sending. */
+    CONN_FLAG_RESPONSE_STATUS_SENT                      = 0x00800000, /**< @brief Response status line sent. */
+    CONN_FLAG_RESPONSE_TRANSFER_ENCODING_HEADER_SENT    = 0x01000000, /**< @brief "Transfer-Encoding" response header sent. */
+    CONN_FLAG_RESPONSE_CONTENT_LENGTH_HEADER_SENT       = 0x02000000, /**< @brief "Content-Length" response header sent. */
+    CONN_FLAG_RESPONSE_HEADERS_SENT                     = 0x04000000, /**< @brief All response headers sent. Continue with response body. */
+    CONN_FLAG_RESPONSE_BODY_SENT                        = 0x08000000, /**< @brief Response body sent. Done. */
 
-    CONN_FLAG_INTERNAL_MASK             = 0xFFFF0000  /**< @brief Mask for internal flags. */
+    CONN_FLAG_INTERNAL_MASK                             = 0xFFFFFF00  /**< @brief Mask for internal flags. */
 };
 
 
@@ -249,31 +295,14 @@ static int http_conn_verify_cb(int preverify, WOLFSSL_X509_STORE_CTX *store)
     }
 
     int allowed = 0;
-
-    DEBUG("SSL verification failed: (%d) %s\n",
-          store->error, wolfSSL_ERR_reason_error_string(store->error));
+    WARN("SSL verification failed: (%d) %s\n", store->error,
+         wolfSSL_ERR_reason_error_string(store->error));
 
     if (0)
     {
-    WARN("SSL verification DISABLED!\n");
-    allowed = 1;
+        WARN("SSL verification DISABLED!\n");
+        allowed = 1;
     }
-
-    #if 0 // OPENSSL_EXTRA
-    WOLFSSL_X509* peer = store->current_cert;
-    if (peer) {
-        char* issuer  = CyaSSL_X509_NAME_oneline(
-                                       CyaSSL_X509_get_issuer_name(peer), 0, 0);
-        char* subject = CyaSSL_X509_NAME_oneline(
-                                      CyaSSL_X509_get_subject_name(peer), 0, 0);
-        printf("peer's cert info:\n issuer : %s\n subject: %s\n", issuer,
-                                                                  subject);
-        XFREE(subject, 0, DYNAMIC_TYPE_OPENSSL);
-        XFREE(issuer,  0, DYNAMIC_TYPE_OPENSSL);
-    }
-    else
-        printf("peer has no cert!\n");
-    #endif
 
     TRACE("leave http_client_verify_cb(%d)\n", allowed);
     return allowed;
@@ -286,8 +315,9 @@ static int http_conn_verify_cb(int preverify, WOLFSSL_X509_STORE_CTX *store)
  * This function resets working buffer and all request/response related fields.
  *
  * @param[in] conn Connection to reset.
+ * @param[in] flags New flags to set.
  */
-static void http_conn_reset(struct HTTP_Conn *conn)
+static void http_conn_reset(struct HTTP_Conn *conn, uint32_t flags)
 {
     // reset request
     conn->request.method = HTTP_UNKNOWN_METHOD;
@@ -296,6 +326,7 @@ static void http_conn_reset(struct HTTP_Conn *conn)
     http_conn_set_request_host(conn, "", 0);
     conn->request.headers.content_length = -1; // missing
     conn->request.headers.connection = HTTP_CONNECTION_MISSING;
+    conn->request.headers.transfer_encoding = HTTP_TRANSFER_ENCODING_MISSING;
 
     // reset response
     conn->response.protocol = HTTP_UNKNOWN_PROTO;
@@ -303,15 +334,16 @@ static void http_conn_reset(struct HTTP_Conn *conn)
     http_conn_set_response_reason(conn, "", 0);
     conn->response.headers.content_length = -1; // missing
     conn->response.headers.connection = HTTP_CONNECTION_MISSING;
+    conn->response.headers.transfer_encoding = HTTP_TRANSFER_ENCODING_MISSING;
 
     // reset working buffer
     conn->internal.buf_pos = 0;
     conn->internal.buf_len = 0;
 
     // reset internal flags
-    conn->internal.flags &= ~CONN_FLAG_INTERNAL_MASK;
+    conn->internal.flags = (flags & ~CONN_FLAG_INTERNAL_MASK);
 
-    // nothing has been read
+    // nothing has been read yet
     conn->internal.content_pos = 0;
 }
 
@@ -362,10 +394,10 @@ int http_conn_new(WOLFSSL_CTX *ctx, int fd, struct HTTP_Conn **conn_)
     conn->ssl = 0;              // nothing
     conn->remote_ipv4 = 0;      // unknown
     conn->remote_port = 0;      // unknown
-    conn->request.uri = 0;      // use static buffer
-    conn->request.host = 0;     // use static buffer
-    conn->response.reason = 0;  // use static buffer
-    http_conn_reset(conn);      // more defaults
+    conn->request.uri_dyn = 0;      // use static buffer
+    conn->request.host_dyn = 0;     // use static buffer
+    conn->response.reason_dyn = 0;  // use static buffer
+    http_conn_reset(conn, 0);       // more defaults
 
     if (ctx) // is connection secure?
     {
@@ -459,27 +491,27 @@ void http_conn_free(struct HTTP_Conn *conn)
     }
 
     // release URI dynamic buffer
-    if (conn->request.uri)
+    if (conn->request.uri_dyn)
     {
         DEBUG("HttpConn_%p releasing URI dynamic buffer\n", conn);
-        free(conn->request.uri);
-        conn->request.uri = 0;
+        free(conn->request.uri_dyn);
+        conn->request.uri_dyn = 0;
     }
 
     // release HOST dynamic buffer
-    if (conn->request.host)
+    if (conn->request.host_dyn)
     {
         DEBUG("HttpConn_%p releasing HOST dynamic buffer\n", conn);
-        free(conn->request.host);
-        conn->request.host = 0;
+        free(conn->request.host_dyn);
+        conn->request.host_dyn = 0;
     }
 
     // release REASON dynamic buffer
-    if (conn->response.reason)
+    if (conn->response.reason_dyn)
     {
         DEBUG("HttpConn_%p releasing REASON dynamic buffer\n", conn);
-        free(conn->response.reason);
-        conn->response.reason = 0;
+        free(conn->response.reason_dyn);
+        conn->response.reason_dyn = 0;
     }
 
     // release connection
@@ -495,23 +527,22 @@ void http_conn_free(struct HTTP_Conn *conn)
  */
 int http_conn_set_request_method(struct HTTP_Conn *conn, enum HTTP_Method method)
 {
-    if (conn->request.method != method)
-    {
-        if (HTTP_UNKNOWN_METHOD == conn->request.method)
-        {
-            DEBUG("HttpConn_%p set request method to \"%s\"\n",
-                  conn, http_method_string(method));
-        }
-        else
-        {
-            DEBUG("HttpConn_%p change request method from \"%s\" to \"%s\"\n",
-                  conn, http_method_string(conn->request.method),
-                        http_method_string(method));
-        }
+    if (method == conn->request.method)
+        return HTTP_ERR_SUCCESS; // already set
 
-        conn->request.method = method; // save
+    if (HTTP_UNKNOWN_METHOD == conn->request.method)
+    {
+        DEBUG("HttpConn_%p set request method to \"%s\"\n",
+              conn, http_method_string(method));
+    }
+    else
+    {
+        DEBUG("HttpConn_%p change request method from \"%s\" to \"%s\"\n",
+              conn, http_method_string(conn->request.method),
+                    http_method_string(method));
     }
 
+    conn->request.method = method; // save
     return HTTP_ERR_SUCCESS; // ok
 }
 
@@ -521,23 +552,22 @@ int http_conn_set_request_method(struct HTTP_Conn *conn, enum HTTP_Method method
  */
 int http_conn_set_request_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto)
 {
-    if (conn->request.protocol != proto)
-    {
-        if (HTTP_UNKNOWN_PROTO == conn->request.protocol)
-        {
-            DEBUG("HttpConn_%p set request protocol to \"%s\"\n",
-                  conn, http_proto_string(proto));
-        }
-        else
-        {
-            DEBUG("HttpConn_%p change request protocol from \"%s\" to \"%s\"\n",
-                  conn, http_proto_string(conn->request.protocol),
-                        http_proto_string(proto));
-        }
+    if (proto == conn->request.protocol)
+        return HTTP_ERR_SUCCESS; // already set
 
-        conn->request.protocol = proto; // save
+    if (HTTP_UNKNOWN_PROTO == conn->request.protocol)
+    {
+        DEBUG("HttpConn_%p set request protocol to \"%s\"\n",
+              conn, http_proto_string(proto));
+    }
+    else
+    {
+        DEBUG("HttpConn_%p change request protocol from \"%s\" to \"%s\"\n",
+              conn, http_proto_string(conn->request.protocol),
+                    http_proto_string(proto));
     }
 
+    conn->request.protocol = proto; // save
     return HTTP_ERR_SUCCESS; // ok
 }
 
@@ -546,8 +576,7 @@ int http_conn_set_request_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto)
  * http_conn_set_request_uri() implementation.
  */
 int http_conn_set_request_uri(struct HTTP_Conn *conn,
-                              const char *uri,
-                              int uri_len)
+                              const char *uri, int uri_len)
 {
     if (uri_len < 0) // uri is NULL-terminated
     {
@@ -561,41 +590,46 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
     }
 
     // release previous value if any
-    if (conn->request.uri)
+    if (conn->request.uri_dyn)
     {
-        free(conn->request.uri);
-        conn->request.uri = 0;
+        DEBUG("HttpConn_%p releasing URI dynamic buffer\n", conn);
+        free(conn->request.uri_dyn);
+        conn->request.uri_dyn = 0;
     }
 
     // update length if it's unknown
     if (uri_len < 0)
         uri_len = strlen(uri);
 
+    char *buf;
+
     // if 'fixed' buffer is large enough, use it
-    if (uri_len < (int)sizeof(conn->request.uri_fixed))
+    if (uri_len < (int)sizeof(conn->request.uri_fix))
     {
-        memcpy(conn->request.uri_fixed, uri, uri_len);
-        conn->request.uri_fixed[uri_len] = 0; // null-terminate
-        conn->request.uri = 0; // use static buffer
-        DEBUG("HttpConn_%p set URI=\"%s\" (use static buffer of %d bytes)\n",
-              conn, http_conn_get_request_uri(conn), uri_len);
+        DEBUG("HttpConn_%p set URI=\"%.*s\" (use static buffer of %d bytes)\n",
+              conn, uri_len, uri, uri_len+1);
+        buf = conn->request.uri_fix;
+        conn->request.uri_dyn = 0;
     }
     else // otherwise allocate dynamic buffer
     {
-        conn->request.uri = (char*)malloc(uri_len+1);
-        if (!conn->request.uri)
+        buf = (char*)malloc(uri_len+1);
+        if (!buf)
         {
             ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save URI: (%d) %s\n",
                   conn, uri_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(conn->request.uri, uri, uri_len);
-        conn->request.uri[uri_len] = 0; // null-terminate
-        conn->request.uri_fixed[0] = 0;
-        DEBUG("HttpConn_%p set URI=\"%s\" (use dynamic buffer of %d bytes)\n",
-              conn, http_conn_get_request_uri(conn), uri_len+1);
+        DEBUG("HttpConn_%p set URI=\"%.*s\" (use dynamic buffer of %d bytes)\n",
+              conn, uri_len, uri, uri_len+1);
+        conn->request.uri_fix[0] = 0;
+        conn->request.uri_dyn = buf;
     }
+
+    // copy data
+    memcpy(buf, uri, uri_len);
+    buf[uri_len] = 0; // null-terminate
 
     TRACE("HttpConn_%p leave http_conn_set_request_uri()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
@@ -606,52 +640,68 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
  * http_conn_add_request_uri() implementation.
  */
 int http_conn_add_request_uri(struct HTTP_Conn *conn,
-                              const char *uri_part)
+                              const char *uri, int uri_len)
 {
-    TRACE("HttpConn_%p enter http_conn_add_request_uri(\"%s\")\n", conn, uri_part);
-
-    const int part_len = strlen(uri_part);
-    // TODO: insert automatic path separator on 'ensure_separator' flag
-
-    if (conn->request.uri) // dynamic buffer is used
+    if (uri_len < 0) // uri is NULL-terminated
     {
-        const int old_len = strlen(conn->request.uri);
-        char *uri = (char*)realloc(conn->request.uri, old_len+part_len+1);
-        if (!uri)
+        TRACE("HttpConn_%p enter http_conn_add_request_uri(\"%s\", %d)\n",
+              conn, uri, uri_len);
+    }
+    else
+    {
+        TRACE("HttpConn_%p enter http_conn_add_request_uri(\"%.*s\", %d)\n",
+              conn, uri_len, uri, uri_len);
+    }
+
+    // update length if it's unknown
+    if (uri_len < 0)
+        uri_len = strlen(uri);
+
+    if (conn->request.uri_dyn) // dynamic buffer is used
+    {
+        const int old_len = strlen(conn->request.uri_dyn);
+        char *buf = (char*)realloc(conn->request.uri_dyn, old_len+uri_len+1);
+        if (!buf)
         {
             ERROR("HttpConn_%p FAILED to re-allocate %d bytes of memory to save URI: (%d) %s\n",
-                  conn, old_len+part_len+1, errno, strerror(errno));
+                  conn, old_len+uri_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(uri+old_len, uri_part, part_len+1); // also copy '\0'
-        conn->request.uri = uri;
+        memcpy(buf+old_len, uri, uri_len);
+        buf[old_len+uri_len] = 0; // null-terminate
+        conn->request.uri_dyn = buf;
 
         DEBUG("HttpConn_%p update URI=\"%s\" (use dynamic buffer of %d bytes)\n",
-              conn, http_conn_get_request_uri(conn), old_len+part_len+1);
+              conn, http_conn_get_request_uri(conn), old_len+uri_len+1);
     }
     else // 'fixed' buffer is used
     {
-        const int old_len = strlen(conn->request.uri_fixed);
-        if (old_len+part_len < (int)sizeof(conn->request.uri_fixed))
+        const int old_len = strlen(conn->request.uri_fix);
+        if (old_len+uri_len < (int)sizeof(conn->request.uri_fix))
         {
-            memcpy(conn->request.uri_fixed+old_len, uri_part, part_len+1); // also copy '\0'
+            memcpy(conn->request.uri_fix+old_len, uri, uri_len);
+            conn->request.uri_fix[old_len+uri_len] = 0; // null-terminate
             DEBUG("HttpConn_%p update URI=\"%s\" (use static buffer of %d bytes)\n",
-                  conn, http_conn_get_request_uri(conn), old_len+part_len);
+                  conn, http_conn_get_request_uri(conn), old_len+uri_len+1);
         }
         else // otherwise allocate dynamic buffer
         {
-            conn->request.uri = (char*)malloc(old_len+part_len+1);
-            if (!conn->request.uri)
+            char *buf = (char*)malloc(old_len+uri_len+1);
+            if (!buf)
             {
                 ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save URI: (%d) %s\n",
-                      conn, old_len+part_len+1, errno, strerror(errno));
+                      conn, old_len+uri_len+1, errno, strerror(errno));
                 return HTTP_ERR_NO_MEMORY; // failed
             }
 
-            memcpy(conn->request.uri, conn->request.uri_fixed, old_len);
-            memcpy(conn->request.uri+old_len, uri_part, part_len+1); // also copy '\0'
-            conn->request.uri_fixed[0] = 0;
+            memcpy(buf, conn->request.uri_fix, old_len);
+            memcpy(buf+old_len, uri, uri_len);
+            buf[old_len+uri_len] = 0; // null-terminate
+            conn->request.uri_dyn = buf;
+            conn->request.uri_fix[0] = 0;
+            DEBUG("HttpConn_%p update URI=\"%s\" (use dynamic buffer of %d bytes)\n",
+                  conn, http_conn_get_request_uri(conn), old_len+uri_len+1);
         }
     }
 
@@ -667,45 +717,58 @@ int http_conn_set_request_host(struct HTTP_Conn *conn,
                                const char *host,
                                int host_len)
 {
-    TRACE("HttpConn_%p enter http_conn_set_request_host(\"%.*s\", %d)\n",
-          conn, host_len, host, host_len);
+    if (host_len < 0) // host is NULL-terminated
+    {
+        TRACE("HttpConn_%p enter http_conn_set_request_host(\"%s\", %d)\n",
+              conn, host, host_len);
+    }
+    else
+    {
+        TRACE("HttpConn_%p enter http_conn_set_request_host(\"%.*s\", %d)\n",
+              conn, host_len, host, host_len);
+    }
 
     // release previous value if any
-    if (conn->request.host)
+    if (conn->request.host_dyn)
     {
-        free(conn->request.host);
-        conn->request.host = 0;
+        DEBUG("HttpConn_%p releasing HOST dynamic buffer\n", conn);
+        free(conn->request.host_dyn);
+        conn->request.host_dyn = 0;
     }
 
     // update length if it's unknown
     if (host_len < 0)
         host_len = strlen(host);
 
+    char *buf;
+
     // if 'fixed' buffer is large enough, use it
-    if (host_len < (int)sizeof(conn->request.host_fixed))
+    if (host_len < (int)sizeof(conn->request.host_fix))
     {
-        memcpy(conn->request.host_fixed, host, host_len);
-        conn->request.host_fixed[host_len] = 0; // null-terminate
-        conn->request.host = 0; // use static buffer
-        DEBUG("HttpConn_%p set HOST=\"%s\" (use static buffer of %d bytes)\n",
-              conn, http_conn_get_request_host(conn), host_len);
+        DEBUG("HttpConn_%p set HOST=\"%.*s\" (use static buffer of %d bytes)\n",
+              conn, host_len, host, host_len+1);
+        buf = conn->request.host_fix;
+        conn->request.host_dyn = 0; // use static buffer
     }
     else // otherwise allocate dynamic buffer
     {
-        conn->request.host = (char*)malloc(host_len+1);
-        if (!conn->request.host)
+        buf = (char*)malloc(host_len+1);
+        if (!buf)
         {
             ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save HOST: (%d) %s\n",
                   conn, host_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(conn->request.host, host, host_len);
-        conn->request.host[host_len] = 0; // null-terminate
-        conn->request.host_fixed[0] = 0;
-        DEBUG("HttpConn_%p set HOST=\"%s\" (use dynamic buffer of %d bytes)\n",
-              conn, http_conn_get_request_host(conn), host_len+1);
+        DEBUG("HttpConn_%p set HOST=\"%.*s\" (use dynamic buffer of %d bytes)\n",
+              conn, host_len, host, host_len+1);
+        conn->request.host_fix[0] = 0;
+        conn->request.host_dyn = buf;
     }
+
+    // copy data
+    memcpy(buf, host, host_len);
+    buf[host_len] = 0; // null-terminate
 
     TRACE("HttpConn_%p leave http_conn_set_request_host()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
@@ -717,23 +780,22 @@ int http_conn_set_request_host(struct HTTP_Conn *conn,
  */
 int http_conn_set_response_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto)
 {
-    if (conn->response.protocol != proto)
-    {
-        if (HTTP_UNKNOWN_PROTO == conn->response.protocol)
-        {
-            DEBUG("HttpConn_%p set response protocol to \"%s\"\n",
-                  conn, http_proto_string(proto));
-        }
-        else
-        {
-            DEBUG("HttpConn_%p change response protocol from \"%s\" to \"%s\"\n",
-                  conn, http_proto_string(conn->response.protocol),
-                        http_proto_string(proto));
-        }
+    if (proto == conn->response.protocol)
+        return HTTP_ERR_SUCCESS; // already set
 
-        conn->response.protocol = proto; // save
+    if (HTTP_UNKNOWN_PROTO == conn->response.protocol)
+    {
+        DEBUG("HttpConn_%p set response protocol to \"%s\"\n",
+              conn, http_proto_string(proto));
+    }
+    else
+    {
+        DEBUG("HttpConn_%p change response protocol from \"%s\" to \"%s\"\n",
+              conn, http_proto_string(conn->response.protocol),
+                    http_proto_string(proto));
     }
 
+    conn->response.protocol = proto; // save
     return HTTP_ERR_SUCCESS; // ok
 }
 
@@ -743,22 +805,21 @@ int http_conn_set_response_proto(struct HTTP_Conn *conn, enum HTTP_Proto proto)
  */
 int http_conn_set_response_status(struct HTTP_Conn *conn, int status)
 {
-    if (conn->response.status != status)
-    {
-        if (0 == conn->response.status) // is unknown
-        {
-            DEBUG("HttpConn_%p set response status to %d\n",
-                  conn, status);
-        }
-        else
-        {
-            DEBUG("HttpConn_%p change response status from %d to %d\n",
-                  conn, conn->response.status, status);
-        }
+    if (status == conn->response.status)
+        return HTTP_ERR_SUCCESS; // already set
 
-        conn->response.status = status; // save
+    if (0 == conn->response.status) // is unknown
+    {
+        DEBUG("HttpConn_%p set response status to %d\n",
+              conn, status);
+    }
+    else
+    {
+        DEBUG("HttpConn_%p change response status from %d to %d\n",
+              conn, conn->response.status, status);
     }
 
+    conn->response.status = status; // save
     return HTTP_ERR_SUCCESS; // ok
 }
 
@@ -782,41 +843,46 @@ int http_conn_set_response_reason(struct HTTP_Conn *conn,
     }
 
     // release previous value if any
-    if (conn->response.reason)
+    if (conn->response.reason_dyn)
     {
-        free(conn->response.reason);
-        conn->response.reason = 0;
+        DEBUG("HttpConn_%p releasing REASON dynamic buffer\n", conn);
+        free(conn->response.reason_dyn);
+        conn->response.reason_dyn = 0;
     }
 
     // update length if it's unknown
     if (reason_len < 0)
         reason_len = strlen(reason);
 
+    char *buf;
+
     // if 'fixed' buffer is large enough, use it
-    if (reason_len < (int)sizeof(conn->response.reason_fixed))
+    if (reason_len < (int)sizeof(conn->response.reason_fix))
     {
-        memcpy(conn->response.reason_fixed, reason, reason_len);
-        conn->response.reason_fixed[reason_len] = 0; // null-terminate
-        conn->response.reason = 0; // use static buffer
-        DEBUG("HttpConn_%p set REASON=\"%s\" (use static buffer of %d bytes)\n",
-              conn, http_conn_get_response_reason(conn), reason_len);
+        DEBUG("HttpConn_%p set REASON=\"%.*s\" (use static buffer of %d bytes)\n",
+              conn, reason_len, reason, reason_len+1);
+        buf = conn->response.reason_fix;
+        conn->response.reason_dyn = 0; // use static buffer
     }
     else // otherwise allocate dynamic buffer
     {
-        conn->response.reason = (char*)malloc(reason_len+1);
-        if (!conn->response.reason)
+        buf = (char*)malloc(reason_len+1);
+        if (!buf)
         {
             ERROR("HttpConn_%p FAILED to allocate %d bytes of memory to save REASON: (%d) %s\n",
                   conn, reason_len+1, errno, strerror(errno));
             return HTTP_ERR_NO_MEMORY; // failed
         }
 
-        memcpy(conn->response.reason, reason, reason_len);
-        conn->response.reason[reason_len] = 0; // null-terminate
-        conn->response.reason_fixed[0] = 0;
-        DEBUG("HttpConn_%p set REASON=\"%s\" (use dynamic buffer of %d bytes)\n",
-              conn, http_conn_get_response_reason(conn), reason_len+1);
+        DEBUG("HttpConn_%p set REASON=\"%.*s\" (use dynamic buffer of %d bytes)\n",
+              conn, reason_len, reason, reason_len+1);
+        conn->response.reason_fix[0] = 0;
+        conn->response.reason_dyn = buf;
     }
+
+    // save data
+    memcpy(buf, reason, reason_len);
+    buf[reason_len] = 0; // null-terminate
 
     TRACE("HttpConn_%p leave http_conn_set_response_reason()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
@@ -982,6 +1048,98 @@ static int http_conn_send(struct HTTP_Conn *conn, const void *buf, int len)
 
 
 /**
+ * @brief Send custom formatted data.
+ *
+ * All data will be written to internal buffer.
+ * If there is no available space in the buffer then
+ * buffer will be sent to the underlying socket first.
+ *
+ * @param[in] conn Connection to send header to.
+ * @param[in] format Format string.
+ * @param[in] args Pointer to stack arguments.
+ * @return Zero on success.
+ *
+ * @see http_conn_sendf()
+ */
+static int http_conn_vsendf(struct HTTP_Conn *conn,
+                            const char *format,
+                            va_list args)
+{
+    TRACE("HttpConn_%p enter http_conn_vsendf()\n", conn);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+    while (1) // at most two iterations
+    {
+        // try to put "data" to the end of internal buffer
+        const int space = HTTP_CONN_BUF_SIZE - ci->buf_len;
+        const int err = vsnprintf((char*)&ci->buf[ci->buf_len],
+                                  space, format, args);
+        if (err < 0)
+        {
+            ERROR("HttpConn_%p failed to format data: (%d) %s\n",
+                  conn, errno, strerror(errno));
+            return HTTP_ERR_FAILED; // failed
+        }
+        else if (err >= space)
+        {
+            // in some rare cases the data
+            // could be too big to fit working buffer
+            if (space == HTTP_CONN_BUF_SIZE)
+            {
+                ERROR("HttpConn_%p failed to send data: %s\n",
+                      conn, "too long to fit internal buffer");
+                return HTTP_ERR_FAILED; // failed
+            }
+
+            // buffer is overflow!
+            DEBUG("HttpConn_%p sending working buffer of %d bytes...\n", conn, ci->buf_len);
+            const int err = http_conn_send_all(conn, ci->buf, ci->buf_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+            ci->buf_len = 0; // buffer is empty now
+            continue; // try again with empty buffer...
+        }
+
+        ci->buf_len += err;
+        break; // done
+    }
+
+    TRACE("HttpConn_%p leave http_conn_vsendf()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Send custom formatted data.
+ *
+ * All data will be written to internal buffer.
+ * If there is no available space in the buffer then
+ * buffer will be sent to the underlying socket first.
+ *
+ * @param[in] conn Connection to send header to.
+ * @param[in] format Format string.
+ * @return Zero on success.
+ *
+ * @see http_conn_send()
+ */
+static int http_conn_sendf(struct HTTP_Conn *conn,
+                           const char *format, ...)
+#ifdef __GNUC__
+    __attribute__((format(printf, 2, 3)))
+#endif
+;
+static int http_conn_sendf(struct HTTP_Conn *conn,
+                           const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    const int err = http_conn_vsendf(conn, format, args);
+    va_end(args);
+    return err;
+}
+
+
+/**
  * @brief Receive some input data directly from underying socket.
  *
  * No any buffers are used here.
@@ -1108,128 +1266,21 @@ static int http_conn_wbuf_shrink(struct HTTP_Conn *conn)
 
 
 /**
- * @brief Parse HTTP header line.
- * @param[in] line Begin of HEADER line.
- *                 Should be NULL-terminated.
- * @param[in] len Length of HEADER line in bytes.
- * @param[out] name Header name.
- * @param[out] value Header value.
+ * @brief Receive full line.
+ *
+ * @param[in] conn Connection to receive line from.
+ * @param[out] line Begin of line.
+ * @param[out] len Length of line in bytes.
  * @return Zero on success.
  */
-static int http_parse_header_line(char *line, int len,
-                                  const char **name,
-                                  const char **value)
+static int http_conn_recv_line(struct HTTP_Conn *conn,
+                               uint8_t **line, int *len)
 {
-    //TRACE("enter http_parse_header_line(\"%.*s\", %d)\n", len, line, len);
-
-    char *colon = (char*)memchr(line, ':', len);
-    if (colon)
-    {
-        if (name) *name = line;
-        *colon = 0; // NULL-terminate 'name'
-
-        colon += 1; // skip ':'
-        // skip spaces in the value
-        while (*colon && *colon == ' ')
-            colon += 1;
-
-        if (value) *value = colon;
-    }
-    else
-    {
-        ERROR("http_parse_header_line(): bad HEADER line \"%.*s\": %s\n",
-              len, line, "no colon found");
-        return HTTP_ERR_BAD_HEADER_NO_COLON;
-    }
-
-    //TRACE("leave http_parse_header_line()\n");
-    return HTTP_ERR_SUCCESS; // OK
-}
-
-
-/**
- * @brief Send custom HTTP header helper.
- *
- * Header name and it's value will be written to internal buffer.
- * If there is no available space in the buffer then
- * buffer will be sent to the underlying socket first.
- *
- * @param[in] conn Connection to send header to.
- * @param[in] name Header name.
- * @param[in] value Header value.
- * @return Zero on success.
- *
- * @see http_conn_send_request_header()
- * @see http_conn_send_response_header()
- */
-static int http_conn_send_header(struct HTTP_Conn *conn,
-                                 const char *name,
-                                 const char *value)
-{
-    TRACE("HttpConn_%p enter http_conn_send_header(\"%s\", \"%s\")\n", conn, name, value);
-    struct HTTP_ConnInternal *ci = &conn->internal;
-
-    while (1) // at most two iterations
-    {
-        // try to put "header: value" to the end of internal buffer
-        const int space = HTTP_CONN_BUF_SIZE - ci->buf_len;
-        const int err = snprintf((char*)&ci->buf[ci->buf_len], space,
-                                 "%s: %s\r\n", name, value);
-        if (err < 0)
-        {
-            ERROR("HttpConn_%p failed to format header: (%d) %s\n",
-                  conn, errno, strerror(errno));
-            return HTTP_ERR_FAILED; // failed
-        }
-        else if (err >= space)
-        {
-            // in some rare cases the header line
-            // could be too big to fit working buffer
-            if (space == HTTP_CONN_BUF_SIZE)
-            {
-                ERROR("HttpConn_%p failed to send header: %s\n",
-                      conn, "too long to fit internal buffer");
-                return HTTP_ERR_FAILED; // failed
-            }
-
-            // buffer is overflow!
-            DEBUG("HttpConn_%p sending working buffer of %d bytes...\n", conn, ci->buf_len);
-            const int err = http_conn_send_all(conn, ci->buf, ci->buf_len);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-            ci->buf_len = 0; // buffer is empty now
-            continue; // try again with empty buffer...
-        }
-
-        ci->buf_len += err;
-        break; // done
-    }
-
-    TRACE("HttpConn_%p leave http_conn_send_header()\n", conn);
-    return HTTP_ERR_SUCCESS; // OK
-}
-
-
-/**
- * @brief Receive custom HTTP header helper.
- *
- * If there is no more HTTP header in the request, then
- * both name and value are set to `NULL`.
- *
- * @param[in] conn Connection to receive HTTP header from.
- * @param[out] name Header name.
- * @param[out] value Header value.
- * @return Zero on success.
- */
-static int http_conn_recv_header(struct HTTP_Conn *conn,
-                                 const char **name,
-                                 const char **value)
-{
-    TRACE("HttpConn_%p enter http_conn_recv_header()\n", conn);
+    // TRACE("HttpConn_%p enter http_conn_recv_line()\n", conn);
     struct HTTP_ConnInternal *ci = &conn->internal;
 
     int attempt = 0;
-    while (1) // read header line
+    while (1) // read line
     {
         // usually do not grow buffer on first iteration
         // grow it only if there is no data in working buffer
@@ -1247,7 +1298,7 @@ static int http_conn_recv_header(struct HTTP_Conn *conn,
             }
             else
             {
-                ERROR("HttpConn_%p header line too big to fit working buffer\n", conn);
+                ERROR("HttpConn_%p line too big to fit working buffer\n", conn);
                 return HTTP_ERR_FAILED; // failed
             }
         }
@@ -1272,21 +1323,112 @@ static int http_conn_recv_header(struct HTTP_Conn *conn,
         }
 
         const int line_len = (line_end - line_beg);
-        if (line_len)
-        {
-            // parse header line
-            line_beg[line_len] = 0; // NULL-terminate for logging purpose
-            const int err = http_parse_header_line((char*)line_beg, line_len,
-                                                   name, value);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-        }
+        if (line) *line = line_beg;
+        if (len) *len = line_len;
 
         ci->buf_pos += line_len + 2; // + "\r\n"
         break; // done
     }
 
-    TRACE("HttpConn_%p leave http_conn_recv_header()\n", conn);
+    // TRACE("HttpConn_%p leave http_conn_recv_line()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Parse HTTP header line.
+ * @param[in] line Begin of HEADER line.
+ *                 Should be NULL-terminated.
+ * @param[in] len Length of HEADER line in bytes.
+ * @param[out] name Header name.
+ * @param[out] value Header value.
+ * @return Zero on success.
+ */
+static int http_parse_header_line(char *line, int len,
+                                  const char **name,
+                                  const char **value)
+{
+    //TRACE("enter http_parse_header_line(\"%.*s\", %d)\n", len, line, len);
+
+    char *colon = (char*)memchr(line, ':', len);
+    if (!colon)
+    {
+        ERROR("http_parse_header_line(): bad HEADER line \"%.*s\": %s\n",
+              len, line, "no colon found");
+        return HTTP_ERR_BAD_HEADER_NO_COLON;
+    }
+
+    if (name) *name = line;
+    *colon = 0; // NULL-terminate 'name'
+
+    colon += 1; // skip ':'
+    // skip spaces in the value
+    while (*colon && *colon == ' ')
+        colon += 1;
+
+    if (value) *value = colon;
+
+    //TRACE("leave http_parse_header_line()\n");
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Send custom HTTP header helper.
+ *
+ * Header name and it's value will be written to internal buffer.
+ * If there is no available space in the buffer then
+ * buffer will be sent to the underlying socket first.
+ *
+ * @param[in] conn Connection to send header to.
+ * @param[in] name Header name.
+ * @param[in] value Header value.
+ * @return Zero on success.
+ *
+ * @see http_conn_send_request_header()
+ * @see http_conn_send_response_header()
+ */
+static inline int http_conn_send_header(struct HTTP_Conn *conn,
+                                        const char *name,
+                                        const char *value)
+{
+    return http_conn_sendf(conn, "%s: %s\r\n", name, value);
+}
+
+
+/**
+ * @brief Receive custom HTTP header helper.
+ *
+ * If there is no more HTTP header in the request, then
+ * both name and value are set to `NULL`.
+ *
+ * @param[in] conn Connection to receive HTTP header from.
+ * @param[out] name Header name.
+ * @param[out] value Header value.
+ * @return Zero on success.
+ */
+static int http_conn_recv_header(struct HTTP_Conn *conn,
+                                 const char **name,
+                                 const char **value)
+{
+    // TRACE("HttpConn_%p enter http_conn_recv_header()\n", conn);
+    uint8_t *line = 0;
+    int line_len = 0;
+    const int err = http_conn_recv_line(conn, &line, &line_len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err;
+
+    if (line_len)
+    {
+        // parse header line
+        line[line_len] = 0; // NULL-terminate! for header value
+        const int err = http_parse_header_line((char*)line, line_len,
+                                               name, value);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+    }
+
+    // TRACE("HttpConn_%p leave http_conn_recv_header()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
 }
 
@@ -1354,6 +1496,126 @@ static int http_conn_recv_body(struct HTTP_Conn *conn,
 
     *len_ = total_read; // report actual size!
     TRACE("HttpConn_%p leave http_conn_recv_body(%d)\n", conn, *len_);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Parse HTTP chunk line.
+ * @param[in] line Begin of CHUNK line.
+ *                 Should be NULL-terminated.
+ * @param[in] len Length of CHUNK line in bytes.
+ * @param[out] chunk_len Chunk length in bytes.
+ * @return Zero on success.
+ */
+static int http_parse_chunk_line(char *line, int len, uint32_t *chunk_len)
+{
+    //TRACE("enter http_parse_chunk_line(\"%.*s\", %d)\n", len, line, len);
+
+    char *end = 0;
+    unsigned long L = strtoul(line, &end, 16);
+    if (end == line)
+    {
+        ERROR("http_parse_chunk_line(): bad CHUNK line \"%.*s\": %s\n",
+              len, line, "no chunk length found");
+        return HTTP_ERR_BAD_CHUNK_NO_LENGTH;
+    }
+
+    // chunk extensions are ignored...
+    if (chunk_len) *chunk_len = L;
+
+    //TRACE("leave http_parse_chunk_line()\n");
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Send CHUNK length helper.
+ *
+ * Chunk length will be written to internal buffer.
+ * If there is no available space in the buffer then
+ * buffer will be sent to the underlying socket first.
+ *
+ * @param[in] conn Connection to send to.
+ * @param[in] chunk_len Chunk length in bytes.
+ * @return Zero on success.
+ */
+static inline int http_conn_send_chunk_len(struct HTTP_Conn *conn, uint32_t chunk_len)
+{
+    return http_conn_sendf(conn, "%x\r\n", chunk_len);
+}
+
+
+/**
+ * @brief Receive CHUNK length helper.
+ *
+ * @param[in] conn Connection to receive from.
+ * @param[out] chunk_len Chunk length in bytes.
+ * @return Zero on success.
+ */
+static int http_conn_recv_chunk_len(struct HTTP_Conn *conn,
+                                    uint32_t *chunk_len)
+{
+    TRACE("HttpConn_%p enter http_conn_recv_chunk_len()\n", conn);
+
+    uint8_t *line = 0;
+    int line_len = 0;
+    const int err = http_conn_recv_line(conn, &line, &line_len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err;
+
+    if (line_len)
+    {
+        // parse CHUNK line
+        line[line_len] = 0; // NULL-terminate for logging purpose
+        const int err = http_parse_chunk_line((char*)line, line_len,
+                                               chunk_len);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+    }
+    else
+    {
+        ERROR("http_conn_recv_chunk_len(): bad CHUNK line: %s\n",
+              "no chunk length found");
+        return HTTP_ERR_BAD_CHUNK_NO_LENGTH;
+    }
+
+    TRACE("HttpConn_%p leave http_conn_recv_chunk_len()\n", conn);
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Receive CHUNK end helper.
+ *
+ * @param[in] conn Connection to receive from.
+ * @return Zero on success.
+ */
+static int http_conn_recv_chunk_end(struct HTTP_Conn *conn)
+{
+    TRACE("HttpConn_%p enter http_conn_recv_chunk_end()\n", conn);
+
+    uint8_t crlf[2]; // end of chunk expected
+    int len = sizeof(crlf);
+
+    DEBUG("HttpConn_%p reading end of chunk...\n", conn);
+    const int err = http_conn_recv_body(conn, crlf, &len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
+    if (len != (int)sizeof(crlf))
+    {
+        ERROR("HttpConn_%p not all data received: %d of %d\n",
+              conn, len, (int)sizeof(crlf));
+        return HTTP_ERR_READ;
+    }
+    if (crlf[0]!='\r' || crlf[1]!='\n')
+    {
+        ERROR("HttpConn_%p %02x%02x received instead of CRLF\n",
+              conn, crlf[0], crlf[1]);
+        return HTTP_ERR_FAILED;
+    }
+
+    TRACE("HttpConn_%p leave http_conn_recv_chunk_end()\n", conn);
     return HTTP_ERR_SUCCESS; // OK
 }
 
@@ -1449,44 +1711,13 @@ int http_conn_send_request_line(struct HTTP_Conn *conn)
         return HTTP_ERR_ILLEGAL; // failed
     }
 
-    while (1) // at most two iterations
-    {
-        // try to put METHOD URI PROTOCOL to the end of internal buffer
-        const int space = HTTP_CONN_BUF_SIZE - ci->buf_len;
-        const int err = snprintf((char*)&ci->buf[ci->buf_len], space,
-                                 "%s %s %s\r\n",
-                                 http_conn_get_request_method(conn),
-                                 http_conn_get_request_uri(conn),
-                                 http_conn_get_request_proto(conn));
-        if (err < 0)
-        {
-            ERROR("HttpConn_%p failed to format request line: (%d) %s\n",
-                  conn, errno, strerror(errno));
-            return HTTP_ERR_FAILED; // failed
-        }
-        else if (err >= space)
-        {
-            // in some rare cases the request line
-            // could be too big to fit working buffer
-            if (space == HTTP_CONN_BUF_SIZE)
-            {
-                ERROR("HttpConn_%p failed to send request line: %s\n",
-                      conn, "too long to fit internal buffer");
-                return HTTP_ERR_FAILED; // failed
-            }
-
-            // buffer is overflow!
-            DEBUG("HttpConn_%p sending working buffer of %d bytes...\n", conn, ci->buf_len);
-            const int err = http_conn_send_all(conn, ci->buf, ci->buf_len);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-            ci->buf_len = 0; // buffer is empty now
-            continue; // try again with empty buffer...
-        }
-
-        ci->buf_len += err;
-        break; // done
-    }
+    // try to put METHOD URI PROTOCOL to the end of internal buffer
+    const int err = http_conn_sendf(conn, "%s %s %s\r\n",
+                                    http_conn_get_request_method(conn),
+                                    http_conn_get_request_uri(conn),
+                                    http_conn_get_request_proto(conn));
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
 
     http_conn_set_flag(conn, CONN_FLAG_REQUEST_LINE_SENT);
     INFO("HttpConn_%p request line \"%s %s %s\" buffered\n", conn,
@@ -1532,12 +1763,16 @@ int http_conn_send_request_header(struct HTTP_Conn *conn,
     // send header via helper
     const int err = http_conn_send_header(conn, name, value);
     if (HTTP_ERR_SUCCESS != err)
-        return err;
+        return err; // failed
 
-    // check if "Host" header is sent
+    // check if known headers are sent
     if (0 == strcmp(name, "Host"))
     {
         http_conn_set_flag(conn, CONN_FLAG_REQUEST_HOST_HEADER_SENT);
+    }
+    else if (0 == strcmp(name, "Content-Length"))
+    {
+        http_conn_set_flag(conn, CONN_FLAG_REQUEST_CONTENT_LENGTH_HEADER_SENT);
     }
     INFO("HttpConn_%p request header \"%s: %s\" buffered\n", conn, name, value);
     DEBUG("HttpConn_%p internal buffer{pos:%d, len:%d}\n",
@@ -1568,16 +1803,41 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
     // have to finish all headers
     if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_HEADERS_SENT))
     {
-        // have to send Host header or request line
+        // have to send known headers or request line
         if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_HOST_HEADER_SENT))
         {
             // send automatic "Host" header (if not send manually before)
             DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Host");
-            const int err = http_conn_send_request_header(conn, "Host", http_conn_get_request_host(conn));
+            //const int err = http_conn_send_request_header(conn, "Host", http_conn_get_request_host(conn));
+            const int err = http_conn_sendf(conn, "%s: %s:%d\r\n", "Host",
+                                            http_conn_get_request_host(conn),
+                                            conn->remote_port);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+            http_conn_set_flag(conn, CONN_FLAG_REQUEST_HOST_HEADER_SENT);
+        }
+        if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_CONTENT_LENGTH_HEADER_SENT)
+         && conn->request.headers.content_length >= 0)
+        {
+            // send automatic "Content-Length" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Content-Length");
+            char value[20+1]; // 2^64 takes maximum 20 decimal digits
+            snprintf(value, sizeof(value), "%lld", (long long int)conn->request.headers.content_length);
+            const int err = http_conn_send_request_header(conn, "Content-Length", value);
             if (HTTP_ERR_SUCCESS != err)
                 return err; // failed
         }
-        else if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_LINE_SENT))
+        if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_TRANSFER_ENCODING_HEADER_SENT)
+         && conn->request.headers.transfer_encoding != HTTP_TRANSFER_ENCODING_MISSING)
+        {
+            // send automatic "Transfer-Encoding" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Transfer-Encoding");
+            const char *value = http_header_transfer_encoding_string(conn->request.headers.transfer_encoding);
+            const int err = http_conn_send_request_header(conn, "Transfer-Encoding", value);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_LINE_SENT))
         {
             // send request line "METHOD URI PROTOCOL"
             DEBUG("HttpConn_%p sending request line...\n", conn);
@@ -1600,11 +1860,29 @@ int http_conn_send_request_body(struct HTTP_Conn *conn,
 
     if (len > 0)
     {
+        // have to send CHUNK line?
+        if (http_conn_is_request_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK length: %d bytes...\n", conn, len);
+            const int err = http_conn_send_chunk_len(conn, len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+
         // write data to buffer
         DEBUG("HttpConn_%p sending %d bytes of data...\n", conn, len);
         const int err = http_conn_send(conn, buf, len);
         if (HTTP_ERR_SUCCESS != err)
             return err; // failed
+
+        // have to write empty line - "chunk end" marker?
+        if (http_conn_is_request_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK end...\n", conn);
+            const int err = http_conn_send(conn, "\r\n", 2);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_send_request_body()\n", conn);
@@ -1632,6 +1910,15 @@ int http_conn_flush_request(struct HTTP_Conn *conn)
     const int err = http_conn_send_request_body(conn, "", 0);
     if (HTTP_ERR_SUCCESS != err)
         return err; // failed
+
+    // have to send final CHUNK?
+    if (http_conn_is_request_chunked(conn))
+    {
+        DEBUG("HttpConn_%p sending empty CHUNK...\n", conn);
+        const int err = http_conn_send(conn, "0\r\n\r\n", 5);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+    }
 
     // flush buffer
     if (ci->buf_len > 0)
@@ -1684,46 +1971,24 @@ int http_conn_recv_response_status(struct HTTP_Conn *conn)
     DEBUG("HttpConn_%p reset working buffer{pos:%d, len:%d}\n",
           conn, ci->buf_pos, ci->buf_len);
 
-    while (1) // read response status line
+    uint8_t *line = 0;
+    int line_len = 0;
+    int err = http_conn_recv_line(conn, &line, &line_len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err;
+
+    if (!line_len)
     {
-        // do we have space in working buffer?
-        if (HTTP_CONN_BUF_SIZE - ci->buf_len > 0)
-        {
-            // getting some data into working buffer
-            const int err = http_conn_wbuf_grow(conn);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-        }
-        else
-        {
-            ERROR("HttpConn_%p response status line too big to fit working buffer\n", conn);
-            return HTTP_ERR_FAILED; // failed
-        }
-
-        // check the whole line received
-        uint8_t *line_beg = ci->buf + ci->buf_pos;
-        const uint8_t *line_end = (const uint8_t*)http_find_crlf(line_beg,
-                                               ci->buf_len - ci->buf_pos);
-        if (!line_end)
-            continue; // need more data
-
-        const int line_len = line_end - line_beg;
-        if (!line_len)
-        {
-            ERROR("HttpConn_%p empty response status line received\n", conn);
-            http_conn_set_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED);
-            return HTTP_ERR_FAILED; // failed
-        }
-
-        // parse response status line
-        line_beg[line_len] = 0; // NULL-terminate for logging purposes
-        const int err = http_conn_parse_response_status(conn, line_beg, line_len);
-        if (HTTP_ERR_SUCCESS != err)
-            return err; // failed
-
-        ci->buf_pos += line_len + 2; // + "\r\n"
-        break; // done
+        ERROR("HttpConn_%p empty response status line received\n", conn);
+        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED);
+        return HTTP_ERR_FAILED; // failed
     }
+
+    // parse response status line
+    line[line_len] = 0; // NULL-terminate for logging purposes
+    err = http_conn_parse_response_status(conn, line, line_len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
 
     // mark response status line as received
     http_conn_set_flag(conn, CONN_FLAG_RESPONSE_STATUS_RECEIVED);
@@ -1777,6 +2042,21 @@ int http_conn_recv_response_header(struct HTTP_Conn *conn,
     {
         INFO("HttpConn_%p EMPTY line received - end of response headers\n", conn);
         http_conn_set_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED); // can receive body now
+
+        // for chunked transfer encoding:
+        // once last header received
+        // read the first chunk length
+        if (http_conn_is_response_chunked(conn))
+        {
+            uint32_t chunk_len = 0;
+            const int err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+            conn->response.headers.content_length = chunk_len;
+            conn->internal.content_pos = 0; // reset read position
+        }
     }
 
     // handle common headers
@@ -1798,22 +2078,39 @@ int http_conn_recv_response_header(struct HTTP_Conn *conn,
             switch (conn->response.headers.connection)
             {
             case HTTP_CONNECTION_CLOSE:
-                INFO("HttpConn_%p \"%s\" connection header - should be closed\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be closed\n",
+                     conn, h_value, "Connection");
                 break;
 
             case HTTP_CONNECTION_KEEP_ALIVE:
-                INFO("HttpConn_%p \"%s\" connection header - should be kept alive\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be kept alive\n",
+                     conn, h_value, "Connection");
                 break;
 
             default:
-                WARN("HttpConn_%p unknown connection \"%s\" header, ignored\n",
-                     conn, h_value);
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Connection", h_value);
             }
         }
 
-        // TODO: more headers: "Content-Type", "Server", "Transfer-Encoding" etc...
+        // check "Transfer-Encoding" header
+        else if (0 == strcmp(h_name, "Transfer-Encoding"))
+        {
+            conn->response.headers.transfer_encoding = http_header_transfer_encoding_parse(h_value);
+            switch (conn->response.headers.transfer_encoding)
+            {
+            case HTTP_TRANSFER_ENCODING_CHUNKED:
+                INFO("HttpConn_%p \"%s\" %s header - should be chunked\n",
+                     conn, h_value, "Transfer-Encoding");
+                break;
+
+            default:
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Transfer-Encoding", h_value);
+            }
+        }
+
+        // TODO: more headers: "Content-Type", "Server" etc...
     }
 
     if (name) *name = h_name;
@@ -1870,6 +2167,14 @@ int http_conn_recv_response_body(struct HTTP_Conn *conn,
             return err; // failed
     }
 
+    // limit iteration length
+    const int rem = http_conn_response_content_can_recv(conn);
+    if (rem > 0 && rem < *len)
+    {
+        DEBUG("HttpConn_%p can't read more than %d bytes\n", conn, rem);
+        *len = rem;
+    }
+
     // receive via helper
     const int err = http_conn_recv_body(conn, buf, len);
     if (HTTP_ERR_SUCCESS != err)
@@ -1882,6 +2187,42 @@ int http_conn_recv_response_body(struct HTTP_Conn *conn,
         DEBUG("HttpConn_%p total %lld/%lld bytes read of response body\n",
               conn, (long long int)conn->internal.content_pos,
               (long long int)conn->response.headers.content_length);
+
+        // if chunked transfer encoding is used
+        // then at the end of chunk just read the "end" chunk marker (CRLF)
+        // at try to read another chunk line
+        if (http_conn_is_response_chunked(conn)
+         && 0 == http_conn_response_content_can_recv(conn))
+        {
+            DEBUG("HttpConn_%p reading end of chunk...\n", conn);
+            int err = http_conn_recv_chunk_end(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            // read next chunk or end of chunks
+            uint32_t chunk_len = 0;
+            err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            if (0 == chunk_len)
+            {
+                DEBUG("HttpConn_%p reading final end of chunk...\n", conn);
+                const int err = http_conn_recv_chunk_end(conn);
+                if (HTTP_ERR_SUCCESS != err)
+                    return err; // failed
+
+                // full body recevied
+                INFO("HttpConn_%p FULL response body received\n", conn);
+                // http_conn_set_flag(conn, CONN_FLAG_RESPONSE_BODY_RECEIVED);
+            }
+            else
+            {
+                INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+                conn->response.headers.content_length = chunk_len;
+                conn->internal.content_pos = 0; // reset read position
+            }
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_recv_response_body(%d)\n", conn, *len);
@@ -1896,6 +2237,10 @@ int http_conn_ignore_response_body(struct HTTP_Conn *conn)
 // see http_conn_ignore_request_body() for almost the same implementation
 {
     TRACE("HttpConn_%p enter http_conn_ignore_response_body()\n", conn);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+    if (http_conn_has_flag(conn, CONN_FLAG_RESPONSE_BODY_RECEIVED))
+        return HTTP_ERR_SUCCESS; // already received
 
     // have to receive rest of response headers?
     if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_HEADERS_RECEIVED))
@@ -1907,48 +2252,45 @@ int http_conn_ignore_response_body(struct HTTP_Conn *conn)
     }
 
     // ignore remaining body if "Content-Length" header is known
-    if (conn->response.headers.content_length > 0)
+    if (conn->response.headers.content_length > 0) // && !http_conn_has_flag(CONN_FLAG_RESPONSE_BODY_RECEIVED)
     {
-        int64_t rem = (conn->response.headers.content_length - conn->internal.content_pos);
-        if (rem > 0)
+        int rem;
+
+        INFO("HttpConn_%p ignoring response body...\n", conn);
+        while ((rem = http_conn_response_content_can_recv(conn)) > 0)
         {
-            uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
-            INFO("HttpConn_%p ignoring %lld bytes of response body...\n",
-                 conn, (long long int)rem);
-            while (rem > 0)
+            // need to grow? do we have space in working buffer?
+            if ((ci->buf_len - ci->buf_pos) < rem       // available < rem
+             && (HTTP_CONN_BUF_SIZE - ci->buf_len) > 0) // && space > 0
             {
-                int n = (rem <= (int64_t)sizeof(tmp_buf)) ? (int)rem : (int)sizeof(tmp_buf);
-                const int err = http_conn_recv_response_body(conn, tmp_buf, &n);
+                // getting some data into working buffer
+                const int err = http_conn_wbuf_grow(conn);
                 if (HTTP_ERR_SUCCESS != err)
                     return err; // failed
-                if (!n) // no data read
-                {
-                    // TODO: wait a bit and try again?
-                    ERROR("HttpConn_%p not ALL data received: %lld bytes remain\n",
-                          conn, (long long int)rem);
-                    return HTTP_ERR_READ; // failed
-                }
-                rem -= n;
             }
+
+            // minimum of available or remaining length
+            int n = (ci->buf_len - ci->buf_pos); // available
+            if (rem < n)
+                n = rem;
+            ci->buf_pos += n;   // ... just skip it
+            ci->content_pos += n;
+
+            const int err = http_conn_wbuf_shrink(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
         }
     }
     else
     {
-        uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
         INFO("HttpConn_%p ignoring ALL bytes of response body...\n", conn);
 
         while (1)
         {
-            int n = sizeof(tmp_buf);
-            const int err = http_conn_recv_response_body(conn, tmp_buf, &n);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-            if (!n) // no data read
-            {
-                // ERROR("HttpConn_%p not ALL data received\n", conn);
-                // return HTTP_ERR_READ; // failed
-                break; // done
-            }
+            // TODO: http_conn_wbuf_grow(conn);
+            // TODO: http_conn_wbuf_shrink(conn);
+            // TODO: read body until connection is closed
+            return HTTP_ERR_ILLEGAL; // not implemented yet
         }
     }
 
@@ -2073,7 +2415,6 @@ int http_conn_recv_request_line(struct HTTP_Conn *conn)
 // see http_conn_recv_response_status() for almost the same implementation
 {
     TRACE("HttpConn_%p enter http_conn_recv_request_line()\n", conn);
-    struct HTTP_ConnInternal *ci = &conn->internal;
 
     // have to receive request line?
     if (http_conn_has_flag(conn, CONN_FLAG_REQUEST_LINE_RECEIVED))
@@ -2082,46 +2423,24 @@ int http_conn_recv_request_line(struct HTTP_Conn *conn)
         return HTTP_ERR_SUCCESS; // OK
     }
 
-    while (1) // read request line
+    uint8_t *line = 0;
+    int line_len = 0;
+    int err = http_conn_recv_line(conn, &line, &line_len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err;
+
+    if (!line_len)
     {
-        // do we have space in working buffer?
-        if (HTTP_CONN_BUF_SIZE - ci->buf_len > 0)
-        {
-            // getting some data into working buffer
-            const int err = http_conn_wbuf_grow(conn);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-        }
-        else
-        {
-            ERROR("HttpConn_%p request line too big to fit working buffer\n", conn);
-            return HTTP_ERR_FAILED; // failed
-        }
-
-        // check the whole line received
-        uint8_t *line_beg = ci->buf + ci->buf_pos;
-        const uint8_t *line_end = (const uint8_t*)http_find_crlf(line_beg,
-                                               ci->buf_len - ci->buf_pos);
-        if (!line_end)
-            continue; // need more data
-
-        const int line_len = line_end - line_beg;
-        if (!line_len)
-        {
-            ERROR("HttpConn_%p empty request line received\n", conn);
-            http_conn_set_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED);
-            return HTTP_ERR_FAILED; // failed
-        }
-
-        // parse request line
-        line_beg[line_len] = 0; // NULL-terminate for logging purposes
-        const int err = http_conn_parse_request_line(conn, line_beg, line_len);
-        if (HTTP_ERR_SUCCESS != err)
-            return err; // failed
-
-        ci->buf_pos += line_len + 2; // + "\r\n"
-        break; // done
+        ERROR("HttpConn_%p empty request line received\n", conn);
+        http_conn_set_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED);
+        return HTTP_ERR_FAILED; // failed
     }
+
+    // parse request line
+    line[line_len] = 0; // NULL-terminate
+    err = http_conn_parse_request_line(conn, line, line_len);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
 
     // mark request line as received
     http_conn_set_flag(conn, CONN_FLAG_REQUEST_LINE_RECEIVED);
@@ -2175,6 +2494,21 @@ int http_conn_recv_request_header(struct HTTP_Conn *conn,
     {
         INFO("HttpConn_%p EMPTY line received - end of request headers\n", conn);
         http_conn_set_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED); // can receive body now
+
+        // for chunked transfer encoding:
+        // once last header received
+        // read the first chunk length
+        if (http_conn_is_request_chunked(conn))
+        {
+            uint32_t chunk_len = 0;
+            const int err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+            conn->request.headers.content_length = chunk_len;
+            conn->internal.content_pos = 0; // reset read position
+        }
     }
 
     // handle common headers
@@ -2193,25 +2527,42 @@ int http_conn_recv_request_header(struct HTTP_Conn *conn,
         else if (0 == strcmp(h_name, "Connection"))
         {
             conn->request.headers.connection = http_header_connection_parse(h_value);
-            switch (conn->response.headers.connection)
+            switch (conn->request.headers.connection)
             {
             case HTTP_CONNECTION_CLOSE:
-                INFO("HttpConn_%p \"%s\" connection header - should be closed\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be closed\n",
+                     conn, h_value, "Connection");
                 break;
 
             case HTTP_CONNECTION_KEEP_ALIVE:
-                INFO("HttpConn_%p \"%s\" connection header - should be kept alive\n",
-                     conn, h_value);
+                INFO("HttpConn_%p \"%s\" %s header - should be kept alive\n",
+                     conn, h_value, "Connection");
                 break;
 
             default:
-                WARN("HttpConn_%p unknown connection \"%s\" header, ignored\n",
-                     conn, h_value);
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Connection", h_value);
             }
         }
 
-        // TODO: more headers: "Content-Type", "Server", "Transfer-Encoding" etc...
+        // check "Transfer-Encoding" header
+        else if (0 == strcmp(h_name, "Transfer-Encoding"))
+        {
+            conn->request.headers.transfer_encoding = http_header_transfer_encoding_parse(h_value);
+            switch (conn->request.headers.transfer_encoding)
+            {
+            case HTTP_TRANSFER_ENCODING_CHUNKED:
+                INFO("HttpConn_%p \"%s\" %s header - should be chunked\n",
+                     conn, h_value, "Transfer-Encoding");
+                break;
+
+            default:
+                WARN("HttpConn_%p unknown %s \"%s\" header, ignored\n",
+                     conn, "Transfer-Encoding", h_value);
+            }
+        }
+
+        // TODO: more headers: "Content-Type", "Server" etc...
     }
 
     if (name) *name = h_name;
@@ -2268,6 +2619,14 @@ int http_conn_recv_request_body(struct HTTP_Conn *conn,
             return err; // failed
     }
 
+    // limit iteration length
+    const int rem = http_conn_request_content_can_recv(conn);
+    if (rem > 0 && rem < *len)
+    {
+        DEBUG("HttpConn_%p can't read more than %d bytes\n", conn, rem);
+        *len = rem;
+    }
+
     // receive via helper
     const int err = http_conn_recv_body(conn, buf, len);
     if (HTTP_ERR_SUCCESS != err)
@@ -2280,6 +2639,42 @@ int http_conn_recv_request_body(struct HTTP_Conn *conn,
         DEBUG("HttpConn_%p total %lld/%lld bytes read of request body\n",
               conn, (long long int)conn->internal.content_pos,
               (long long int)conn->request.headers.content_length);
+
+        // if chunked transfer encoding is used
+        // then at the end of chunk just read the "end" chunk marker (CRLF)
+        // at try to read another chunk line
+        if (http_conn_is_request_chunked(conn)
+         && 0 == http_conn_request_content_can_recv(conn))
+        {
+            DEBUG("HttpConn_%p reading end of chunk...\n", conn);
+            int err = http_conn_recv_chunk_end(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            // read next chunk or end of chunks
+            uint32_t chunk_len = 0;
+            err = http_conn_recv_chunk_len(conn, &chunk_len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+
+            if (0 == chunk_len)
+            {
+                DEBUG("HttpConn_%p reading final end of chunk...\n", conn);
+                const int err = http_conn_recv_chunk_end(conn);
+                if (HTTP_ERR_SUCCESS != err)
+                    return err; // failed
+
+                // full body recevied
+                INFO("HttpConn_%p FULL request body received\n", conn);
+                http_conn_set_flag(conn, CONN_FLAG_REQUEST_BODY_RECEIVED);
+            }
+            else
+            {
+                INFO("HttpConn_%p chunk of %d bytes received\n", conn, chunk_len);
+                conn->request.headers.content_length = chunk_len;
+                conn->internal.content_pos = 0; // reset read position
+            }
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_recv_request_body(%d)\n", conn, *len);
@@ -2294,6 +2689,10 @@ int http_conn_ignore_request_body(struct HTTP_Conn *conn)
 // see http_conn_ignore_response_body() for almost the same implementation
 {
     TRACE("HttpConn_%p enter http_conn_ignore_request_body()\n", conn);
+    struct HTTP_ConnInternal *ci = &conn->internal;
+
+    if (http_conn_has_flag(conn, CONN_FLAG_REQUEST_BODY_RECEIVED))
+        return HTTP_ERR_SUCCESS; // already received
 
     // have to receive rest of request headers?
     if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED))
@@ -2305,34 +2704,46 @@ int http_conn_ignore_request_body(struct HTTP_Conn *conn)
     }
 
     // ignore remaining body if "Content-Length" header is known
-    if (conn->request.headers.content_length > 0)
+    if (conn->request.headers.content_length > 0) // && !http_conn_has_flag(CONN_FLAG_REQUEST_BODY_RECEIVED)
     {
-        int64_t rem = (conn->request.headers.content_length - conn->internal.content_pos);
-        if (rem > 0)
+        int rem;
+
+        INFO("HttpConn_%p ignoring request body...\n", conn);
+        while ((rem = http_conn_request_content_can_recv(conn)) > 0)
         {
-            uint8_t tmp_buf[HTTP_CONN_BUF_SIZE];
-            INFO("HttpConn_%p ignoring %lld bytes of request body...\n",
-                 conn, (long long int)rem);
-            while (rem > 0)
+            // need to grow? do we have space in working buffer?
+            if ((ci->buf_len - ci->buf_pos) < rem       // available < rem
+             && (HTTP_CONN_BUF_SIZE - ci->buf_len) > 0) // && space > 0
             {
-                int n = (rem <= (int64_t)sizeof(tmp_buf)) ? (int)rem : (int)sizeof(tmp_buf);
-                const int err = http_conn_recv_request_body(conn, tmp_buf, &n);
+                // getting some data into working buffer
+                const int err = http_conn_wbuf_grow(conn);
                 if (HTTP_ERR_SUCCESS != err)
                     return err; // failed
-                if (!n) // no data read
-                {
-                    // TODO: wait a bit and try again?
-                    ERROR("HttpConn_%p not ALL data received: %lld bytes remain\n",
-                          conn, (long long int)rem);
-                    return HTTP_ERR_READ; // failed
-                }
-                rem -= n;
             }
+
+            // minimum of available or remaining length
+            int n = (ci->buf_len - ci->buf_pos); // available
+            if (rem < n)
+                n = rem;
+            ci->buf_pos += n;   // ... just skip it
+            ci->content_pos += n;
+
+            const int err = http_conn_wbuf_shrink(conn);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
         }
     }
     else
     {
-        // we don't know how much to ignore
+        INFO("HttpConn_%p ignoring ALL bytes of request body...\n", conn);
+
+        while (1)
+        {
+            // TODO: http_conn_wbuf_grow(conn);
+            // TODO: http_conn_wbuf_shrink(conn);
+            // TODO: read body until connection is closed
+            return HTTP_ERR_ILLEGAL; // not implemented yet
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_ignore_request_body()\n", conn);
@@ -2357,7 +2768,7 @@ int http_conn_send_response_status(struct HTTP_Conn *conn)
     }
 
     // have to receive request headers & body?
-    if (1) // !http_conn_has_flag(conn, CONN_FLAG_REQUEST_HEADERS_RECEIVED))
+    if (!http_conn_has_flag(conn, CONN_FLAG_REQUEST_BODY_RECEIVED))
     {
         DEBUG("HttpConn_%p ensure full request received...\n", conn);
         const int err = http_conn_ignore_request_body(conn);
@@ -2378,47 +2789,16 @@ int http_conn_send_response_status(struct HTTP_Conn *conn)
         // if status is still unknown, use any non-empty string
         WARN("HttpConn_%p reason phrase for status %d is unknow\n",
              conn, http_conn_get_response_status(conn));
-        reason = "Unknown";
+        reason = "UNKNOWN";
     }
 
-    while (1) // at most two iterations
-    {
-        // try to put PROTOCOL STATUS REASON to the end of internal buffer
-        const int space = HTTP_CONN_BUF_SIZE - ci->buf_len;
-        const int err = snprintf((char*)&ci->buf[ci->buf_len], space,
-                                 "%s %d %s\r\n",
-                                 http_conn_get_response_proto(conn),
-                                 http_conn_get_response_status(conn),
-                                 reason);
-        if (err < 0)
-        {
-            ERROR("HttpConn_%p failed to format response status line: (%d) %s\n",
-                  conn, errno, strerror(errno));
-            return HTTP_ERR_FAILED; // failed
-        }
-        else if (err >= space)
-        {
-            // in some rare cases the response status line
-            // could be too big to fit working buffer
-            if (space == HTTP_CONN_BUF_SIZE)
-            {
-                ERROR("HttpConn_%p failed to send response status line: %s\n",
-                      conn, "too long to fit internal buffer");
-                return HTTP_ERR_FAILED; // failed
-            }
-
-            // buffer is overflow!
-            DEBUG("HttpConn_%p sending working buffer of %d bytes...\n", conn, ci->buf_len);
-            const int err = http_conn_send_all(conn, ci->buf, ci->buf_len);
-            if (HTTP_ERR_SUCCESS != err)
-                return err; // failed
-            ci->buf_len = 0; // buffer is empty now
-            continue; // try again with empty buffer...
-        }
-
-        ci->buf_len += err;
-        break; // done
-    }
+    // try to put PROTOCOL STATUS REASON to the end of internal buffer
+    const int err = http_conn_sendf(conn, "%s %d %s\r\n",
+                                    http_conn_get_response_proto(conn),
+                                    http_conn_get_response_status(conn),
+                                    reason);
+    if (HTTP_ERR_SUCCESS != err)
+        return err;
 
     http_conn_set_flag(conn, CONN_FLAG_RESPONSE_STATUS_SENT);
     INFO("HttpConn_%p response status line \"%s %d %s\" buffered\n", conn,
@@ -2463,8 +2843,17 @@ int http_conn_send_response_header(struct HTTP_Conn *conn,
     // send header via helper
     const int err = http_conn_send_header(conn, name, value);
     if (HTTP_ERR_SUCCESS != err)
-        return err;
+        return err; // failed
 
+    // check if known headers are sent
+    if (0 == strcmp(name, "Content-Length"))
+    {
+        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_CONTENT_LENGTH_HEADER_SENT);
+    }
+    else if (0 == strcmp(name, "Transfer-Encoding"))
+    {
+        http_conn_set_flag(conn, CONN_FLAG_RESPONSE_TRANSFER_ENCODING_HEADER_SENT);
+    }
     INFO("HttpConn_%p response header \"%s: %s\" buffered\n", conn, name, value);
     DEBUG("HttpConn_%p internal buffer{pos:%d, len:%d}\n",
           conn, ci->buf_pos, ci->buf_len);
@@ -2493,6 +2882,28 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
     // have to finish all headers
     if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_HEADERS_SENT))
     {
+        // have to send known headers or resposne status
+        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_CONTENT_LENGTH_HEADER_SENT)
+         && conn->response.headers.content_length >= 0)
+        {
+            // send automatic "Content-Length" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Content-Length");
+            char value[20+1]; // 2^64 takes maximum 20 decimal digits
+            snprintf(value, sizeof(value), "%lld", (long long int)conn->response.headers.content_length);
+            const int err = http_conn_send_request_header(conn, "Content-Length", value);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+        if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_TRANSFER_ENCODING_HEADER_SENT)
+         && conn->response.headers.transfer_encoding != HTTP_TRANSFER_ENCODING_MISSING)
+        {
+            // send automatic "Transfer-Encoding" header (if not send manually before)
+            DEBUG("HttpConn_%p sending automatic \"%s\" header...\n", conn, "Transfer-Encoding");
+            const char *value = http_header_transfer_encoding_string(conn->response.headers.transfer_encoding);
+            const int err = http_conn_send_request_header(conn, "Transfer-Encoding", value);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
         if (!http_conn_has_flag(conn, CONN_FLAG_RESPONSE_STATUS_SENT))
         {
             // send response status line "PROTOCOL STATUS REASON"
@@ -2514,11 +2925,29 @@ int http_conn_send_response_body(struct HTTP_Conn *conn,
 
     if (len > 0)
     {
+        // have to send CHUNK line?
+        if (http_conn_is_response_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK length: %d bytes...\n", conn, len);
+            const int err = http_conn_send_chunk_len(conn, len);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
+
         // write data to buffer
         DEBUG("HttpConn_%p sending %d bytes of data...\n", conn, len);
         const int err = http_conn_send(conn, buf, len);
         if (HTTP_ERR_SUCCESS != err)
             return err; // failed
+
+        // have to write empty line - "chunk end" marker?
+        if (http_conn_is_response_chunked(conn))
+        {
+            DEBUG("HttpConn_%p sending CHUNK end...\n", conn);
+            const int err = http_conn_send(conn, "\r\n", 2);
+            if (HTTP_ERR_SUCCESS != err)
+                return err; // failed
+        }
     }
 
     TRACE("HttpConn_%p leave http_conn_send_response_body()\n", conn);
@@ -2546,6 +2975,15 @@ int http_conn_flush_response(struct HTTP_Conn *conn)
     const int err = http_conn_send_response_body(conn, "", 0);
     if (HTTP_ERR_SUCCESS != err)
         return err; // failed
+
+    // have to send final CHUNK?
+    if (http_conn_is_response_chunked(conn))
+    {
+        DEBUG("HttpConn_%p sending empty CHUNK...\n", conn);
+        const int err = http_conn_send(conn, "0\r\n\r\n", 5);
+        if (HTTP_ERR_SUCCESS != err)
+            return err; // failed
+    }
 
     // flush buffer
     if (ci->buf_len > 0)
@@ -2643,14 +3081,14 @@ int http_client_new(enum SSL_Proto proto, struct HTTP_Client **client_)
     }
     DEBUG("HttpClient_%p SSL context SSL_CTX_%p created\n", client, client->ctx);
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // reset the whole connection cache
     memset(client->conn_cache, 0, sizeof(client->conn_cache));
     DEBUG("HttpClient_%p reset connection cache of %d items\n",
           client, HTTP_CLIENT_CONN_CACHE_SIZE);
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
     // reset the whole resolve cache
     memset(client->resolve_cache, 0, sizeof(client->resolve_cache));
     DEBUG("HttpClient_%p reset resolve cache of %d items\n",
@@ -2676,11 +3114,11 @@ void http_client_free(struct HTTP_Client *client)
         return; // nothing to release
     }
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // release all cached connections
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
-        struct HTTP_ClientConnCacheItem *item = &client->conn_cache[i];
+        struct HTTP_ClientConnCacheEntry *item = &client->conn_cache[i];
         if (!item->conn)
             continue;
 
@@ -2690,7 +3128,7 @@ void http_client_free(struct HTTP_Client *client)
     }
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
     // there is nothing to release in resolve cache
 #endif // HTTP_RESOLVE_CACHE_SIZE
 
@@ -2711,28 +3149,33 @@ void http_client_free(struct HTTP_Client *client)
 }
 
 // connection cache
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
 
 /**
  * @brief Find and take connection from cache.
  * @param[in] client HTTP client.
+ * @param[in] secure The secure connection flag.
  * @param[in] ipv4 Target IPv4 address.
  * @param[in] port Target port number.
  * @return Found connection or `NULL`.
  */
 static struct HTTP_Conn* http_client_conn_cache_take(struct HTTP_Client *client,
-                                                     uint32_t ipv4, int port)
+                                                     int secure,
+                                                     uint32_t ipv4,
+                                                     int port)
 {
     // TODO: lock mutex
 
     // iterate over all cached items
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
-        struct HTTP_ClientConnCacheItem *item = &client->conn_cache[i];
+        struct HTTP_ClientConnCacheEntry *item = &client->conn_cache[i];
         struct HTTP_Conn *conn = item->conn;
         if (!conn)
             continue;
 
+        if ((conn->ssl != 0) != (secure != 0))
+            continue; // secure mismatch
         if (conn->remote_ipv4 != ipv4)
             continue; // IP address mismatch
         if (conn->remote_port != port)
@@ -2760,14 +3203,14 @@ static struct HTTP_Conn* http_client_conn_cache_take(struct HTTP_Client *client,
 static void http_client_conn_cache_save(struct HTTP_Client *client,
                                         struct HTTP_Conn *conn)
 {
-    struct HTTP_ClientConnCacheItem *place = 0;
+    struct HTTP_ClientConnCacheEntry *place = 0;
 
     // TODO: lock mutex
 
     // iterate over all cached items
     for (int i = 0; i < HTTP_CLIENT_CONN_CACHE_SIZE; ++i)
     {
-        struct HTTP_ClientConnCacheItem *item = &client->conn_cache[i];
+        struct HTTP_ClientConnCacheEntry *item = &client->conn_cache[i];
         struct HTTP_Conn *conn = item->conn;
         if (!conn)
         {
@@ -2800,7 +3243,7 @@ static void http_client_conn_cache_save(struct HTTP_Client *client,
 
 
 // resolve cache
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
 
 /**
  * @brief Calculate digest on host name.
@@ -2833,13 +3276,13 @@ static int http_client_host_digest(const char *host, int host_len,
  * @param[in] host_digest Target host digest.
  * @return Cache item or `NULL` if nothing found.
  */
-static struct HTTP_ResolveCacheItem* http_client_resolve_cache_find(struct HTTP_Client *client,
+static struct HTTP_ResolveCacheEntry* http_client_resolve_cache_find(struct HTTP_Client *client,
                                                                     const void *host_digest)
 {
     // iterate over all items
     for (int i = 0; i < HTTP_RESOLVE_CACHE_SIZE; ++i)
     {
-        struct HTTP_ResolveCacheItem *item = &client->resolve_cache[i];
+        struct HTTP_ResolveCacheEntry *item = &client->resolve_cache[i];
         if (!item->ipv4)
             continue; // no address, check next
 
@@ -2859,14 +3302,14 @@ static struct HTTP_ResolveCacheItem* http_client_resolve_cache_find(struct HTTP_
  * @param[in] client HTTP client.
  * @return Cache item.
  */
-static struct HTTP_ResolveCacheItem* http_client_resolve_cache_find_place(struct HTTP_Client *client)
+static struct HTTP_ResolveCacheEntry* http_client_resolve_cache_find_place(struct HTTP_Client *client)
 {
-    struct HTTP_ResolveCacheItem *place = 0;
+    struct HTTP_ResolveCacheEntry *place = 0;
 
     // iterate over all items
     for (int i = 0; i < HTTP_RESOLVE_CACHE_SIZE; ++i)
     {
-        struct HTTP_ResolveCacheItem *item = &client->resolve_cache[i];
+        struct HTTP_ResolveCacheEntry *item = &client->resolve_cache[i];
         if (!item->ipv4) // item is empty
             return item; // use it
 
@@ -2892,7 +3335,7 @@ static int http_client_resolve_cache_remove(struct HTTP_Client *client, uint32_t
     // iterate over all items
     for (int i = 0; i < HTTP_RESOLVE_CACHE_SIZE; ++i)
     {
-        struct HTTP_ResolveCacheItem *item = &client->resolve_cache[i];
+        struct HTTP_ResolveCacheEntry *item = &client->resolve_cache[i];
         if (item->ipv4 == ipv4)
         {
             item->ipv4 = 0; // clear it
@@ -2991,6 +3434,126 @@ int http_client_set_cipher_list(struct HTTP_Client *client,
 
 
 /**
+ * @brief Resolve host address.
+ * @param[in] client HTTP client to resolve host for.
+ * @param[in] host Host name, NULL-terminated.
+ * @param[out] addr IPv4 address.
+ * @return Zero on success.
+ */
+static int http_client_resolve_host(struct HTTP_Client *client,
+                                    const char *host,
+                                    struct sockaddr_in *addr)
+{
+    struct hostent *entry = gethostbyname(host);
+    if (!entry)
+    {
+       ERROR("HttpClient_%p failed to resolve \"%s\" host: %s\n",
+             client, host, "no entry found");
+       return HTTP_ERR_RESOLVE; // failed
+    }
+
+    // check address type
+    if (AF_INET != entry->h_addrtype)
+    {
+        ERROR("HttpClient_%p failed to resolve \"%s\" host: %s\n",
+              client, host, "unknown address type");
+        return HTTP_ERR_RESOLVE; // failed
+    }
+
+    // check address size
+    if (sizeof(addr->sin_addr) != entry->h_length)
+    {
+        ERROR("HttpClient_%p failed to resolve \"%s\" host: %s\n",
+              client, host, "unknown address size");
+        return HTTP_ERR_RESOLVE; // failed
+    }
+
+    // use the first available address
+    const void *host_addr = entry->h_addr_list[0];
+    memcpy(&addr->sin_addr, host_addr, sizeof(addr->sin_addr));
+
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
+ * @brief Resolve host address from cache.
+ * @param[in] client HTTP client to resolve host for.
+ * @param[out] addr IPv4 address.
+ * @return Zero on success.
+ */
+static int http_client_resolve(struct HTTP_Client *client,
+                               const char *host, int host_len,
+                               struct sockaddr_in *addr)
+{
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
+    uint8_t host_digest[HTTP_HOST_DIGEST_SIZE]; // TODO: check how fast is the digest calculation
+    int err = http_client_host_digest(host, host_len, &host_digest, sizeof(host_digest));
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
+
+    struct HTTP_ResolveCacheEntry *rc_item = http_client_resolve_cache_find(client, host_digest);
+    if (rc_item) // TODO: check item lifetime
+    {
+        addr->sin_addr.s_addr = rc_item->ipv4;
+        rc_item->use_count += 1; // update use count
+        INFO("HttpClient_%p resolved as \"%d.%d.%d.%d\" from cache\n",
+             client, PRINT_IPV4_ADDR(*addr));
+        return HTTP_ERR_SUCCESS; // OK
+    }
+#endif // HTTP_RESOLVE_CACHE_SIZE
+
+    // no cached item, resolving...
+
+    // resolver requires NULL-terminated string as input,
+    // so we have to copy our host to temporary buffer!
+    char host_fix[128]; // static
+    char *host_dyn = 0; // dynamic
+    char *host_tmp = host_fix;
+    if (host_len >= (int)sizeof(host_fix))
+    {
+        // ERROR("HttpClient_%p host length is too big\n", client);
+        // return HTTP_ERR_FAILED;
+
+        // use dynamic memory buffer
+        host_tmp = host_dyn = (char*)malloc(host_len+1);
+        if (!host_dyn)
+        {
+            ERROR("HttpClient_%p FAILED to allocate %d bytes of memory to save host name: (%d) %s\n",
+                  client, host_len+1, errno, strerror(errno));
+            return HTTP_ERR_NO_MEMORY; // failed
+        }
+    }
+    memcpy(host_tmp, host, host_len);
+    host_tmp[host_len] = 0; // NULL-terminate
+
+    // resolve IP address
+    DEBUG("HttpClient_%p resolving the \"%.*s\" host...\n", client, host_len, host);
+    err = http_client_resolve_host(client, host_tmp, addr);
+    if (host_dyn) free(host_dyn);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
+    INFO("HttpClient_%p host \"%.*s\" resolved as \"%d.%d.%d.%d\"\n",
+         client, host_len, host, PRINT_IPV4_ADDR(*addr));
+
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
+    rc_item = http_client_resolve_cache_find_place(client);
+    if (rc_item)
+    {
+        DEBUG("HttpClient_%p put host \"%s\" to cache as \"%d.%d.%d.%d\"\n",
+              client, host_tmp, PRINT_IPV4_ADDR(*addr));
+
+        memcpy(rc_item->host_dig, host_digest, HTTP_HOST_DIGEST_SIZE);
+        rc_item->ipv4 = addr->sin_addr.s_addr;
+        rc_item->use_count = 0; // reset use count
+    }
+#endif // HTTP_RESOLVE_CACHE_SIZE
+
+    return HTTP_ERR_SUCCESS; // OK
+}
+
+
+/**
  * @brief Connect to a host.
  *
  * This is helper function.
@@ -3014,99 +3577,22 @@ static int http_client_connect(struct HTTP_Client *client,
     addr.sin_family = AF_INET;          // IPv4
     addr.sin_addr.s_addr = INADDR_ANY;  // any for now
     addr.sin_port = port_h2n(port);
-    (void)flags; // fake usage
 
-    if (1) // resolve host name
-    {
-#if HTTP_RESOLVE_CACHE_SIZE > 0
-        uint8_t host_digest[HTTP_HOST_DIGEST_SIZE]; // TODO: check how fast is the digest calculation
-        const int err = http_client_host_digest(host, host_len, &host_digest, sizeof(host_digest));
-        if (HTTP_ERR_SUCCESS != err)
-            return err; // failed
-        struct HTTP_ResolveCacheItem *rc_item = http_client_resolve_cache_find(client, host_digest);
-        if (rc_item) // TODO: check item lifetime
-        {
-            addr.sin_addr.s_addr = rc_item->ipv4;
-            rc_item->use_count += 1; // update use count
-            INFO("HttpClient_%p resolved as \"%d.%d.%d.%d\" from cache\n",
-                 client, PRINT_IPV4_ADDR(addr));
-        }
-        else // no cached item, resolving...
-        {
-#endif // HTTP_RESOLVE_CACHE_SIZE
-
-        // resolver requires NULL-terminated string as input,
-        // so we have to copy our host to temporary buffer!
-        char host_tmp[256];
-        if (host_len >= (int)sizeof(host_tmp))
-        {
-            ERROR("HttpClient_%p host length is too big\n", client);
-            // TODO: use dynamic memory buffer
-            return HTTP_ERR_FAILED;
-        }
-        memcpy(host_tmp, host, host_len);
-        host_tmp[host_len] = 0;
-
-        // resolve IP address
-        DEBUG("HttpClient_%p resolving the \"%s\" host...\n", client, host_tmp);
-        struct hostent *entry = gethostbyname(host_tmp);
-        if (entry)
-        {
-            // check address type
-            if (AF_INET != entry->h_addrtype)
-            {
-                ERROR("HttpClient_%p failed to resolve \"%s\" host: %s\n", client,
-                      host_tmp, "unknown address type");
-                return HTTP_ERR_RESOLVE; // failed
-            }
-
-            //check address size
-            if (sizeof(addr.sin_addr) != entry->h_length)
-            {
-                ERROR("HttpClient_%p failed to resolve \"%s\" host: %s\n", client,
-                      host_tmp, "unknown address size");
-                return HTTP_ERR_RESOLVE; // failed
-            }
-
-            // use the first available address
-            const void *host_addr = entry->h_addr_list[0];
-            memcpy(&addr.sin_addr, host_addr, sizeof(addr.sin_addr));
-
-            INFO("HttpClient_%p host \"%s\" resolved as \"%d.%d.%d.%d\"\n",
-                 client, host_tmp, PRINT_IPV4_ADDR(addr));
-        }
-        else
-        {
-           ERROR("HttpClient_%p failed to resolve \"%s\" host: %s\n",
-                 client, host_tmp, "no entry found");
-           return HTTP_ERR_RESOLVE; // failed
-        }
-#if HTTP_RESOLVE_CACHE_SIZE > 0
-        rc_item = http_client_resolve_cache_find_place(client);
-        if (rc_item)
-        {
-            DEBUG("HttpClient_%p put host \"%s\" to cache as \"%d.%d.%d.%d\"\n",
-                  client, host_tmp, PRINT_IPV4_ADDR(addr));
-
-            memcpy(rc_item->host_dig, host_digest, HTTP_HOST_DIGEST_SIZE);
-            rc_item->ipv4 = addr.sin_addr.s_addr;
-            rc_item->use_count = 0; // reset use count
-        }
-        } // no cache item
-#endif // HTTP_RESOLVE_CACHE_SIZE
-    } // resolve host name
+    // resolve host name
+    const int err = http_client_resolve(client, host, host_len, &addr);
+    if (HTTP_ERR_SUCCESS != err)
+        return err; // failed
 
     struct HTTP_Conn *conn;
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     // first, try to use available cached connection
-    conn = http_client_conn_cache_take(client,
+    conn = http_client_conn_cache_take(client, secure,
                                        addr.sin_addr.s_addr,
                                        port_n2h(addr.sin_port));
     if (conn)
     {
-        INFO("HttpClient_%p use cached connection HttpConn_%p\n",
-             client, conn);
-        http_conn_reset(conn);
+        INFO("HttpClient_%p use cached connection HttpConn_%p\n", client, conn);
+        http_conn_reset(conn, flags);
     }
     else
     {
@@ -3129,7 +3615,7 @@ static int http_client_connect(struct HTTP_Client *client,
         ERROR("HttpClient_%p FAILED to connect: (%d) %s\n",
               client, errno, strerror(errno));
 
-#if HTTP_RESOLVE_CACHE_SIZE > 0
+#if defined(HTTP_RESOLVE_CACHE_SIZE) && HTTP_RESOLVE_CACHE_SIZE > 0
         // if connect() failed then there is no sense to
         // cache that IP address, so just remove it...
         const int n_removed = http_client_resolve_cache_remove(client, addr.sin_addr.s_addr);
@@ -3145,8 +3631,12 @@ static int http_client_connect(struct HTTP_Client *client,
     if (HTTP_ERR_SUCCESS != err)
     {
         ERROR("HttpClient_%p failed to create connection\n", client);
+        misc_closesocket(fd); // should be close manually in this case
         return err; // failed
     }
+
+    // update connection flags
+    conn->internal.flags |= (flags & ~CONN_FLAG_INTERNAL_MASK);
 
     // save remote endpoint address/port
     conn->remote_ipv4 = addr.sin_addr.s_addr;
@@ -3172,7 +3662,7 @@ static int http_client_connect(struct HTTP_Client *client,
              wolfSSL_get_version(conn->ssl));
     }
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
     }
 #endif // HTTP_CLIENT_CONN_CACHE_SIZE
 
@@ -3194,8 +3684,8 @@ int http_client_do(struct HTTP_Client *client,
     const char *proto = 0;
     int         proto_len = 0;
     const char *host = 0;
-    int         host_len = 0;
-    int         port = 0; // invalid
+    int         host_len = 0;   // host
+    int         port = 0;       // invalid
     const char *uri = 0;
     int         uri_len = 0;
 
@@ -3285,17 +3775,23 @@ done:
 
     if (conn)
     {
-        INFO("HttpClient_%p request \"%s %s/%s\" done with \"%d %s\" status in %d ms\n",
+        INFO("HttpClient_%p request \"%s %s:%d%s\" done with \"%d %s\" status in %d ms\n",
              client, http_conn_get_request_method(conn),
-             http_conn_get_request_host(conn), http_conn_get_request_uri(conn),
+             http_conn_get_request_host(conn), conn->remote_port, http_conn_get_request_uri(conn),
              http_conn_get_response_status(conn), http_conn_get_response_reason(conn),
              misc_time_ms() - t_start);
 
-#if HTTP_CLIENT_CONN_CACHE_SIZE > 0
+#if defined(HTTP_CLIENT_CONN_CACHE_SIZE) && HTTP_CLIENT_CONN_CACHE_SIZE > 0
         if (HTTP_ERR_SUCCESS != err)
         {
             DEBUG("HttpConn_%p cannot be cached: %s\n",
                   conn, "finished with error");
+            goto release;
+        }
+        if (http_conn_has_flag(conn, HTTP_CONN_DO_NOT_CACHE))
+        {
+            DEBUG("HttpConn_%p cannot be cached: %s\n",
+                  conn, "marked with DO-NOT-CACHE flag");
             goto release;
         }
         if (HTTP_CONNECTION_CLOSE == conn->response.headers.connection)
@@ -3304,6 +3800,12 @@ done:
                   conn, "\"Connection: close\" header received");
             goto release;
         }
+
+        // just in case ignore all response body
+        DEBUG("HttpClient_%p ignoring HttpConn_%p response body before put to cache\n", client, conn);
+        err = http_conn_ignore_response_body(conn);
+        if (HTTP_ERR_SUCCESS != err)
+            goto release;
 
         DEBUG("HttpClient_%p saving connection HttpConn_%p to cache...\n",
               client, conn);
@@ -4246,19 +4748,17 @@ const void* http_find_crlf(const void *buf, int len)
     {
         const uint8_t *p = (const uint8_t*)memchr(buf, '\r', len);
         if (!p)
-        {
-            break;
-        }
+            break; // stop
 
-        if (p[1] != '\n')
-        {
-            // '\r' found as a standalone symbol
-            len -= p+1 - (const uint8_t*)buf;
-            buf = p+1; // ignore '\r'
-            continue;
-        }
+        len -= p+1 - (const uint8_t*)buf;
+        buf = p+1; // ignore '\r'
+        if (!len)
+            break; // stop
 
-        return p; // found
+        if (p[1] == '\n')
+            return p; // found
+
+        // '\r' found as a standalone symbol, continue
     }
 
     return 0; // not found
