@@ -6,3 +6,6 @@
 # Doxygen output
 /doxygen.log
 /html/
+
+# certificates
+/*.der

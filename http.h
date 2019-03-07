@@ -374,10 +374,11 @@ const char* http_header_transfer_encoding_string(enum HTTP_HeaderTransferEncodin
 /**
  * @brief HTTP request related data.
  *
- * Contain request line related data: HTTP method, HTTP protocol and URI.
+ * Contains request line related data: HTTP method, HTTP protocol and URI.
  * Also contains target host and a set of known headers:
  * - "Content-Length" as `headers.content_length`
  * - "Connection" as `headers.connection`
+ * - "Transfer-Encoding" as `headers.transfer_encoding`
  *
  * If URI is short enough to fit the `uri_fix` array
  * then no dynamic memory is used. Otherwise the dynamic
@@ -460,10 +461,11 @@ struct HTTP_Request
 /**
  * @brief HTTP response related data.
  *
- * Contain response status line related data: HTTP protocol, status code and
+ * Contains response status line related data: HTTP protocol, status code and
  * reason phrase. Also contains a set of known headers:
  * - "Content-Length" as `headers.content_length`
  * - "Connection" as `headers.connection`
+ * - "Transfer-Encoding" as `headers.transfer_encoding`
  *
  * If reason phrase is short enough to fit the `reason_fix` array
  * then no dynamic memory is used. Otherwise the dynamic
@@ -730,7 +732,9 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
 /**
  * @brief Add a part of HTTP request URI to the end.
  * @param[in] conn Connection to update URI of.
- * @param[in] uri_part Request URI part to add.
+ * @param[in] uri Request URI part to add.
+ * @param[in] uri_len Request URI length in bytes.
+ *                    `-1` if string is NULL-terminated.
  * @return Zero on success.
  *
  * @see http_conn_get_request_uri()
@@ -738,7 +742,8 @@ int http_conn_set_request_uri(struct HTTP_Conn *conn,
  * @relates HTTP_Conn
  */
 int http_conn_add_request_uri(struct HTTP_Conn *conn,
-                              const char *uri_part);
+                              const char *uri,
+                              int uri_len);
 
 
 /**
@@ -1925,8 +1930,7 @@ int http_server_stop(struct HTTP_Server *server);
  * @param[out] proto_len Protocol length.
  * @param[out] host Target host position.
  *                  Note, this string is not NULL-terminated!
- * @param[out] hostport_len Target host+port length.
- * @param[out] host_len Target host length.
+  * @param[out] host_len Target host length.
  * @param[out] port Port number.
  *                  If no port number is present it is detected based on protocol.
  *                  If protocol is unknown then `port` is not changed.
@@ -1937,8 +1941,7 @@ int http_server_stop(struct HTTP_Server *server);
  */
 int http_parse_url(const char *url,
                    const char **proto, int *proto_len,
-                   const char **host, int *host_len,
-                   int *hostport_len, int *port,
+                   const char **host, int *host_len, int *port,
                    const char **path, int *path_len);
 
 
@@ -2015,15 +2018,16 @@ const void* http_find_crlf(const void *buf, int len);
  * There are a few data structures and functions related to
  * both @ref client_page and @ref server_page.
  *
- * - SSL_Proto enum is used to define all possible SSL protocols.
- * - HTTP_Method enum is used to define all possible HTTP methods.
- * - HTTP_Proto enum is used to define all supported HTTP protocols.
- * - HTTP_Status enum is used to define some popular HTTP status codes.
- * - HTTP_Error enum contains all possible error codes.
- * - HTTP_ConnFlags enum contains bit field options related to connection.
+ * - #SSL_Proto enum is used to define all possible SSL protocols.
+ * - #HTTP_Method enum is used to define all possible HTTP methods.
+ * - #HTTP_Proto enum is used to define all supported HTTP protocols.
+ * - #HTTP_Status enum is used to define some popular HTTP status codes.
+ * - #HTTP_Error enum contains all possible error codes.
+ * - #HTTP_ConnFlags enum contains bit field options related to connection.
  *
  * The following enums are used as various headers:
- * - HTTP_HeaderConnection enum for "Connection" header
+ * - #HTTP_HeaderConnection enum for "Connection" header
+ * - #HTTP_HeaderTransferEncoding enum for "Transfer-Encoding" header
  */
 
 
@@ -2033,6 +2037,106 @@ const void* http_find_crlf(const void *buf, int len);
  * HTTP_Client sends HTTP requests and parses HTTP responses.
  * @tableofcontents
  *
+ * @section client_init Client initialization
+ *
+ * First of all an instance of HTTP_Client should be created with http_client_new().
+ * At the end HTTP_Client instance should be released with http_client_free().
+ *
+ * ```
+ * #include "http.h"
+ * #define LOG_MODULE "main"
+ * #include "misc.h"
+ * int main(void)
+ * {
+ *     struct HTTP_Client *client = 0;
+ *     int res = 0; // OK by default
+ *
+ *     // initialize WolfSSL library
+ *     const int err = wolfSSL_Init();
+ *     if (WOLFSSL_SUCCESS != err)
+ *     {
+ *         ERROR("failed to initialize WolfSSL library\n");
+ *         goto failed; // failed
+ *     }
+ *     wolfSSL_Debugging_OFF();
+ *     INFO("wolfSSL version: %s\n",
+ *          wolfSSL_lib_version());
+ *
+ *     // create HTTP client
+ *     if (!!http_client_new(SSL_PROTO_TLSv1_2, &client))
+ *     {
+ *         ERROR("failed to create HTTP client\n");
+ *         goto failed; // failed
+ *     }
+ *
+ *     // TODO: initialize client SSL context, set cipher list
+ *     // TODO: send requests
+ *
+ *     if (0)
+ *     {
+ *         // tricky way to set exit code to -1
+ *         // in normal scenario this code is always ignored
+ * failed:
+ *         res = -1;
+ *     }
+ *
+ *     DEBUG("cleaning up...\n");
+ *     http_client_free(client);
+ *     wolfSSL_Cleanup();
+ *
+ *     INFO("completed (exit code: %d)\n", res);
+ *     return res;
+ * }
+ * ```
+ *
+ * @section client_callback Sending requests
+ *
+ * To send a HTTP request corresponding callback function should be provided.
+ * This #HTTP_ClientCallback client callback function is used to prepare
+ * and send HTTP request and to receive and parse HTTP response.
+ *
+ * On calling http_client_do() the HTTP client establishes new connection
+ * or gets existing unused one and then calls provided client callback function.
+ * Note, client callback is called even if there is a connection error occurred.
+ *
+ * It is user responsibility to prepare HTTP request:
+ * - set HTTP protocol with http_conn_set_request_proto(), by default HTTP/1.1 is used.
+ * - modify HTTP request URI or query parameters with http_conn_set_request_uri()
+ *   or http_conn_add_request_uri()
+ * - provide any number of addition HTTP request headers with http_conn_send_request_header()
+ * - provide HTTP request body with http_conn_send_request_body()
+ * - and finally send the request with http_conn_flush_request()
+ *
+ * And to process HTTP response:
+ * - receive HTTP response status line with http_conn_recv_response_status()
+ *   and check the HTTP response status is OK
+ * - receive all HTTP response headers with http_conn_recv_response_header() or
+ *   just ignore all remaining headers with http_conn_ignore_response_headers().
+ * - receive whole HTTP response body with http_conn_recv_response_body() or
+ *   just ignore all remaining response data with http_conn_ignore_response_body().
+ *
+ * Almost all steps are optional and have appropriate default implementation.
+ * So if no "Host" request header is provided then automatic header will be
+ * sent just before request body.
+ *
+ * Note, the order of these steps is important! For example, it is illegal to
+ * call http_send_request_header() after http_send_request_body().
+ *
+ * Minimalistic callback can be the following:
+ *
+ * ```
+ * int my_callback(int err, struct HTTP_Conn *conn, void *user_data)
+ * {
+ *      if (HTTP_ERR_SUCCESS != err)
+ *          return err; // connection failed
+ *
+ *      // TODO: customize request
+ *
+ *      //
+ *      err = http_conn_recv_response_status(conn);
+ * }
+ * ```
+ *
  * @section resolve_cache Resolve cache
  *
  * TBD
@@ -2040,6 +2144,8 @@ const void* http_find_crlf(const void *buf, int len);
  * @section connection_cache Connection cache
  *
  * TBD
+ *
+ * @section connection_wbuf Working buffer
  */
 
 

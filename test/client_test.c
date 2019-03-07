@@ -20,7 +20,7 @@
 static int test_print_response(int err, struct HTTP_Conn *conn, void *user_data)
 {
     (void)user_data;
-    if (err != 0)
+    if (HTTP_ERR_SUCCESS != err)
     {
         ERROR("failed to connect: %d\n", err);
         return err;
@@ -111,14 +111,15 @@ int main(void)
 
     // TODO: initialize client SSL context
     // TODO: http_client_set_cipher_list(client, "???");
-    // wolfSSL_CTX_UseSNI(client->ctx, 0, "reqres.in", 9);
+    wolfSSL_CTX_UseSNI(client->ctx, 0, "badssl.com", 9);
 
     wolfSSL_CTX_load_verify_locations(client->ctx, NULL, "/etc/ssl/certs/");
+    //http_client_load_verify_cert_file(client, "/home/dataart/test/http/server-cert.pem"); // www.wolfssl.com
     //http_client_load_verify_cert_file(client, "/etc/ssl/certs/DST_Root_CA_X3.pem"); // www.howsmyssl.com
     //http_client_load_verify_cert_file(client, "/etc/ssl/certs/USERTrust_RSA_Certification_Authority.pem"); // reqres.in + jsonplaceholder.typicode.com
     //http_client_load_verify_cert_file(client, "/etc/ssl/certs/Baltimore_CyberTrust_Root.pem"); // fakerestapi.azurewebsites.net
 
-    http_client_get(client, "https://www.yandex.ru/",
+    http_client_get(client, "https://badssl.com/",
                     //"https://www.howsmyssl.com/a/check",
                     //"https://fakerestapi.azurewebsites.net/api/Books/1",
                     //"https://jsonplaceholder.typicode.com/posts/1",
